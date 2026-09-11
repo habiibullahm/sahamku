@@ -12,6 +12,7 @@ from aiogram.types import FSInputFile
 
 from sahamku import db
 from sahamku.analysis import aftermarket
+from sahamku.config import settings
 from sahamku.llm.ask import ask as llm_ask
 from sahamku.pipeline import load_joined
 from sahamku.report import chart
@@ -32,8 +33,10 @@ HELP = """<b>Sahamku</b> — daily scan saham LQ45
 /unwatch KODE — hapus dari watchlist
 /watchlist — lihat watchlist
 /ask pertanyaan — tanya AI (contoh: /ask kenapa BBCA turun?)
+/stop — berhenti menerima laporan otomatis · /resume — aktifkan lagi
 
 Laporan otomatis: pre-market 08:15 & after-market 17:00 WIB (hari bursa).
+Kuota /ask: {limit} pertanyaan per hari.
 """
 
 
@@ -41,12 +44,30 @@ Laporan otomatis: pre-market 08:15 & after-market 17:00 WIB (hari bursa).
 async def cmd_start(m: types.Message) -> None:
     with db.db() as conn:
         db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
-    await m.answer(HELP)
+        db.set_subscribed(conn, m.chat.id, True)
+    await m.answer(HELP.format(limit=settings.ask_daily_limit))
 
 
 @router.message(Command("help"))
 async def cmd_help(m: types.Message) -> None:
-    await m.answer(HELP)
+    await m.answer(HELP.format(limit=settings.ask_daily_limit))
+
+
+@router.message(Command("stop"))
+async def cmd_stop(m: types.Message) -> None:
+    with db.db() as conn:
+        db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
+        db.set_subscribed(conn, m.chat.id, False)
+    await m.answer("🔕 Laporan otomatis dimatikan. Perintah lain tetap bisa dipakai. "
+                   "Kirim /resume untuk mengaktifkan lagi.")
+
+
+@router.message(Command("resume"))
+async def cmd_resume(m: types.Message) -> None:
+    with db.db() as conn:
+        db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
+        db.set_subscribed(conn, m.chat.id, True)
+    await m.answer("🔔 Laporan otomatis diaktifkan: pre-market 08:15 & after-market 17:00 WIB.")
 
 
 @router.message(Command("scan"))
@@ -136,7 +157,17 @@ async def cmd_ask(m: types.Message, command: CommandObject) -> None:
     if not q:
         await m.answer("Format: /ask pertanyaan (contoh: /ask kenapa BBCA turun?)")
         return
-    thinking = await m.answer("🤔 Menganalisis…")
+    is_admin = settings.admin_chat_id == m.chat.id
+    with db.db() as conn:
+        used = db.ask_count_today(conn, m.chat.id)
+        if not is_admin and used >= settings.ask_daily_limit:
+            await m.answer(f"⏳ Kuota /ask hari ini habis ({settings.ask_daily_limit}/hari). "
+                           "Coba lagi besok, atau lihat /stock KODE dan /scan.")
+            return
+        if not is_admin:
+            used = db.ask_increment(conn, m.chat.id)
+    sisa = "" if is_admin else f" · sisa kuota {settings.ask_daily_limit - used}"
+    thinking = await m.answer(f"🤔 Menganalisis…{sisa}")
     try:
         with db.db() as conn:
             answer = await llm_ask(conn, q)

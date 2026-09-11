@@ -7,6 +7,7 @@ import logging
 from datetime import date, datetime, timedelta
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramForbiddenError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -37,8 +38,8 @@ def _today() -> date:
     return datetime.now(TZ).date()
 
 
-async def _run_logged(job: str, fn) -> str:
-    """Bungkus job: catat ke job_runs, tangkap exception."""
+async def _run_logged(job: str, fn, bot: Bot | None = None) -> str:
+    """Bungkus job: catat ke job_runs, tangkap exception, beri tahu admin bila gagal."""
     with db.db() as conn:
         run_id = db.job_start(conn, job)
     try:
@@ -51,6 +52,13 @@ async def _run_logged(job: str, fn) -> str:
         log.exception("job %s failed", job)
         with db.db() as conn:
             db.job_finish(conn, run_id, "error", repr(e))
+        if bot and settings.admin_chat_id:
+            try:
+                await bot.send_message(
+                    settings.admin_chat_id,
+                    f"🚨 Job <b>{job}</b> gagal: <code>{type(e).__name__}: {str(e)[:300]}</code>")
+            except Exception:
+                log.warning("gagal kirim alert admin", exc_info=True)
         return "error"
 
 
@@ -77,7 +85,7 @@ async def job_ingest_global(bot: Bot) -> None:
             c = await asyncio.to_thread(ingest_global, conn)
         return f"{len(c)} tickers"
 
-    await _run_logged("ingest_global", run)
+    await _run_logged("ingest_global", run, bot)
 
 
 async def job_premarket(bot: Bot) -> None:
@@ -99,13 +107,16 @@ async def job_premarket(bot: Bot) -> None:
                     await bot.send_message(cid, fmt.premarket(r))
                     sent += 1
                     await asyncio.sleep(0.05)
+                except TelegramForbiddenError:
+                    db.set_subscribed(conn, cid, False)
+                    log.info("chat %s memblokir bot → unsubscribe", cid)
                 except Exception:
                     log.warning("gagal kirim premarket ke %s", cid, exc_info=True)
             r = premarket.build(conn, for_date=_today())
-        ch = await _post_channel(bot, fmt.premarket(r)) if r else False
+        ch = await _post_channel(bot, fmt.premarket(r, cta=True)) if r else False
         return f"sent to {sent} chats; channel={ch}"
 
-    await _run_logged("premarket", run)
+    await _run_logged("premarket", run, bot)
 
 
 async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int = 1) -> None:
@@ -142,7 +153,7 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
         await job_send_aftermarket(bot, missing)
         return f"complete={ok}; report sent now"
 
-    await _run_logged(f"eod_pipeline#{attempt}", run)
+    await _run_logged(f"eod_pipeline#{attempt}", run, bot)
 
 
 async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> None:
@@ -161,13 +172,16 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
                     await bot.send_message(cid, fmt.aftermarket(r))
                     sent += 1
                     await asyncio.sleep(0.05)
+                except TelegramForbiddenError:
+                    db.set_subscribed(conn, cid, False)
+                    log.info("chat %s memblokir bot → unsubscribe", cid)
                 except Exception:
                     log.warning("gagal kirim aftermarket ke %s", cid, exc_info=True)
             r = aftermarket.build(conn, missing=missing)
-        ch = await _post_channel(bot, fmt.aftermarket(r)) if r else False
+        ch = await _post_channel(bot, fmt.aftermarket(r, cta=True)) if r else False
         return f"sent to {sent} chats; channel={ch}"
 
-    await _run_logged("send_aftermarket", run)
+    await _run_logged("send_aftermarket", run, bot)
 
 
 async def job_weekly_backtest(bot: Bot) -> None:
@@ -180,7 +194,7 @@ async def job_weekly_backtest(bot: Bot) -> None:
             await bot.send_message(settings.admin_chat_id, summary_text(res))
         return f"{len(res)} rules"
 
-    await _run_logged("weekly_backtest", run)
+    await _run_logged("weekly_backtest", run, bot)
 
 
 def build_scheduler(bot: Bot) -> AsyncIOScheduler:

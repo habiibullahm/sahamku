@@ -24,6 +24,8 @@ COMMANDS = [
     BotCommand(command="unwatch", description="Hapus dari watchlist"),
     BotCommand(command="watchlist", description="Lihat watchlist"),
     BotCommand(command="ask", description="Tanya AI tentang saham"),
+    BotCommand(command="stop", description="Berhenti menerima laporan otomatis"),
+    BotCommand(command="resume", description="Aktifkan lagi laporan otomatis"),
     BotCommand(command="help", description="Bantuan"),
 ]
 

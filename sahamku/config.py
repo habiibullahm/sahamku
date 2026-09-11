@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     admin_chat_id: int | None = None
     # Channel publik untuk broadcast laporan (mis. "@sahamku_id"); bot harus admin channel
     channel_id: str | None = None
+    bot_username: str = "sahamku_id_bot"
+    # Kuota /ask per chat per hari (admin bebas kuota)
+    ask_daily_limit: int = 10
     db_path: Path = PROJECT_ROOT / "sahamku.db"
     charts_dir: Path = PROJECT_ROOT / "charts"
 

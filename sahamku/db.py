@@ -59,6 +59,12 @@ CREATE TABLE IF NOT EXISTS users (
     joined_at TEXT NOT NULL,
     subscribed INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS ask_log (
+    chat_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (chat_id, day)
+);
 CREATE TABLE IF NOT EXISTS job_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT NOT NULL,
@@ -243,6 +249,30 @@ def subscribed_chat_ids(conn: sqlite3.Connection) -> list[int]:
     return [r["chat_id"] for r in conn.execute("SELECT chat_id FROM users WHERE subscribed=1")]
 
 
+def set_subscribed(conn: sqlite3.Connection, chat_id: int, on: bool) -> None:
+    conn.execute("UPDATE users SET subscribed=? WHERE chat_id=?", (1 if on else 0, chat_id))
+
+
+def is_subscribed(conn: sqlite3.Connection, chat_id: int) -> bool:
+    row = conn.execute("SELECT subscribed FROM users WHERE chat_id=?", (chat_id,)).fetchone()
+    return bool(row and row["subscribed"])
+
+
+# ---------- rate limit /ask ----------
+
+def ask_count_today(conn: sqlite3.Connection, chat_id: int) -> int:
+    row = conn.execute(
+        "SELECT n FROM ask_log WHERE chat_id=? AND day=?", (chat_id, _today())).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def ask_increment(conn: sqlite3.Connection, chat_id: int) -> int:
+    conn.execute(
+        "INSERT INTO ask_log (chat_id, day, n) VALUES (?,?,1) "
+        "ON CONFLICT(chat_id, day) DO UPDATE SET n=n+1", (chat_id, _today()))
+    return ask_count_today(conn, chat_id)
+
+
 def watch_add(conn: sqlite3.Connection, chat_id: int, code: str) -> bool:
     cur = conn.execute(
         "INSERT OR IGNORE INTO watchlist (chat_id, code, added_at) VALUES (?,?,?)",
@@ -290,3 +320,7 @@ def _f(v) -> float | None:
 
 def _now() -> str:
     return datetime.now(TZ).isoformat(timespec="seconds")
+
+
+def _today() -> str:
+    return datetime.now(TZ).strftime("%Y-%m-%d")

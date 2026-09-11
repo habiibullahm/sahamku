@@ -6,10 +6,14 @@ from html import escape
 
 from sahamku.analysis.aftermarket import AfterMarketReport, Mover, TickerSignals
 from sahamku.analysis.premarket import PreMarketReport
-from sahamku.config import DISCLAIMER
+from sahamku.config import DISCLAIMER, settings
 from sahamku.signals.scoring import RATING_EMOJI
 
 TELEGRAM_MAX = 4096
+
+
+def cta_line() -> str:
+    return f"🤖 Detail saham, chart &amp; tanya AI → @{settings.bot_username}"
 
 
 def pct(v: float | None) -> str:
@@ -51,7 +55,7 @@ def _signal_block(items: list[TickerSignals], limit: int = 10) -> str:
     return "\n".join(lines)
 
 
-def aftermarket(r: AfterMarketReport) -> str:
+def aftermarket(r: AfterMarketReport, cta: bool = False) -> str:
     parts = [
         f"📊 <b>Sahamku — After Market {r.date}</b>",
         "",
@@ -82,11 +86,13 @@ def aftermarket(r: AfterMarketReport) -> str:
             parts.append(f"  <code>{code}</code> {num(m.close)} {pct(m.pct)}{rt}")
     if r.missing:
         parts += ["", "⚠️ Data belum lengkap untuk: " + ", ".join(r.missing)]
+    if cta:
+        parts += ["", cta_line()]
     parts += ["", f"<i>{DISCLAIMER}</i>"]
     return _clip("\n".join(parts))
 
 
-def premarket(r: PreMarketReport) -> str:
+def premarket(r: PreMarketReport, cta: bool = False) -> str:
     parts = [
         f"🌅 <b>Sahamku — Pre-Market {r.date}</b>",
         "",
@@ -110,6 +116,8 @@ def premarket(r: PreMarketReport) -> str:
         parts += ["", "👀 <b>Watchlist</b>"]
         for code, info in r.watchlist.items():
             parts.append(f"  <code>{code}</code> {escape(info)}")
+    if cta:
+        parts += ["", cta_line()]
     parts += ["", f"<i>{DISCLAIMER}</i>"]
     return _clip("\n".join(parts))
 
