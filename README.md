@@ -36,6 +36,18 @@ docker compose down              # hentikan
 - Jangan jalankan `python -m sahamku.bot.main` lokal bersamaan dengan container — Telegram hanya
   mengizinkan satu long-polling per bot.
 
+## Deploy ke Railway
+
+1. New Project → Deploy from GitHub repo → pilih repo ini (Dockerfile & `railway.json` terdeteksi).
+2. Variables: `TELEGRAM_BOT_TOKEN`, `ADMIN_CHAT_ID`, `LLM_PROVIDER=groq`, `GROQ_API_KEY`,
+   `GROQ_MODEL=openai/gpt-oss-120b`, `DB_PATH=/data/sahamku.db`, `CHARTS_DIR=/data/charts`,
+   `TZ=Asia/Jakarta`.
+3. Settings → Volumes → Add Volume, mount path **`/data`** (wajib, agar DB bertahan antar deploy).
+4. Tidak perlu public domain/port (worker, bukan web). `numReplicas` harus 1 — Telegram hanya
+   mengizinkan satu long-polling per bot.
+5. Deploy pertama menjalankan backfill 3 tahun otomatis (±1–2 menit), lalu bot polling.
+6. Matikan instance lain (`docker compose down` di laptop) agar tidak konflik `getUpdates`.
+
 ## Command
 
 | Command | Fungsi |
