@@ -18,6 +18,24 @@ python -m sahamku.bot.main      # jalankan bot (long polling + scheduler)
 
 `ADMIN_CHAT_ID` = chat_id Telegram Anda (kirim `/start` ke bot, lihat log, atau pakai @userinfobot).
 
+## Jalankan 24 jam dengan Docker
+
+```bash
+docker compose up -d --build     # build + jalankan di background, auto-restart
+docker compose logs -f           # lihat log
+docker compose down              # hentikan
+```
+
+- DB dan chart disimpan di `./data/` (volume). Jika `data/sahamku.db` belum ada, entrypoint
+  menjalankan backfill 3 tahun otomatis saat start pertama.
+- Setelah mengubah `.env`: `docker compose up -d` (recreate). Setelah mengubah kode:
+  `docker compose up -d --build`.
+- Agar bot hidup setelah laptop/PC restart: aktifkan **Docker Desktop → Settings → General →
+  Start Docker Desktop when you sign in**. Bot tetap butuh mesin ini menyala; untuk 24/7 penuh,
+  jalankan compose yang sama di VPS.
+- Jangan jalankan `python -m sahamku.bot.main` lokal bersamaan dengan container — Telegram hanya
+  mengizinkan satu long-polling per bot.
+
 ## Command
 
 | Command | Fungsi |

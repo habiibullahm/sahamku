@@ -9,3 +9,4 @@ charts/
 .ruff_cache/
 *.egg-info/
 build/
+data/
