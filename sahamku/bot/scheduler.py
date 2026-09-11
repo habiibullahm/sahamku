@@ -17,6 +17,7 @@ from sahamku.analysis import aftermarket, premarket, weekly
 from sahamku.config import TZ, settings
 from sahamku.ingestion.eod import ingest, validate_eod
 from sahamku.ingestion.global_ import ingest_global
+from sahamku.llm import narrative
 from sahamku.pipeline import recompute_all
 from sahamku.report import format as fmt
 from sahamku.universe import is_trading_day
@@ -97,6 +98,9 @@ async def job_premarket(bot: Bot) -> None:
             ids = set(db.subscribed_chat_ids(conn))
             if settings.admin_chat_id:
                 ids.add(settings.admin_chat_id)
+            base = premarket.build(conn, for_date=_today())
+            narr = await narrative.get_or_create(
+                conn, "premarket", base.date, fmt.premarket(base)) if base else None
             sent = 0
             for cid in ids:
                 watch = db.watch_list(conn, cid)
@@ -104,7 +108,7 @@ async def job_premarket(bot: Bot) -> None:
                 if not r:
                     continue
                 try:
-                    await bot.send_message(cid, fmt.premarket(r))
+                    await bot.send_message(cid, fmt.premarket(r, narrative=narr))
                     sent += 1
                     await asyncio.sleep(0.05)
                 except TelegramForbiddenError:
@@ -113,7 +117,7 @@ async def job_premarket(bot: Bot) -> None:
                 except Exception:
                     log.warning("gagal kirim premarket ke %s", cid, exc_info=True)
             r = premarket.build(conn, for_date=_today())
-        ch = await _post_channel(bot, fmt.premarket(r, cta=True)) if r else False
+        ch = await _post_channel(bot, fmt.premarket(r, cta=True, narrative=narr)) if r else False
         return f"sent to {sent} chats; channel={ch}"
 
     await _run_logged("premarket", run, bot)
@@ -164,6 +168,9 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
             ids = set(db.subscribed_chat_ids(conn))
             if settings.admin_chat_id:
                 ids.add(settings.admin_chat_id)
+            base = aftermarket.build(conn, missing=missing)
+            narr = await narrative.get_or_create(
+                conn, "aftermarket", base.date, fmt.aftermarket(base)) if base else None
             sent = 0
             for cid in ids:
                 watch = db.watch_list(conn, cid)
@@ -171,7 +178,7 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
                 if not r:
                     continue
                 try:
-                    await bot.send_message(cid, fmt.aftermarket(r))
+                    await bot.send_message(cid, fmt.aftermarket(r, narrative=narr))
                     sent += 1
                     await asyncio.sleep(0.05)
                 except TelegramForbiddenError:
@@ -180,7 +187,7 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
                 except Exception:
                     log.warning("gagal kirim aftermarket ke %s", cid, exc_info=True)
             r = aftermarket.build(conn, missing=missing)
-        ch = await _post_channel(bot, fmt.aftermarket(r, cta=True)) if r else False
+        ch = await _post_channel(bot, fmt.aftermarket(r, cta=True, narrative=narr)) if r else False
         return f"sent to {sent} chats; channel={ch}"
 
     await _run_logged("send_aftermarket", run, bot)
@@ -210,7 +217,8 @@ async def job_weekly_recap(bot: Bot) -> None:
             ids = set(db.subscribed_chat_ids(conn))
             if settings.admin_chat_id:
                 ids.add(settings.admin_chat_id)
-        text = fmt.weekly(r)
+            narr = await narrative.get_or_create(conn, "weekly", r.week_end, fmt.weekly(r))
+        text = fmt.weekly(r, narrative=narr)
         sent = 0
         for cid in ids:
             try:
@@ -222,7 +230,7 @@ async def job_weekly_recap(bot: Bot) -> None:
                     db.set_subscribed(conn, cid, False)
             except Exception:
                 log.warning("gagal kirim rekap ke %s", cid, exc_info=True)
-        ch = await _post_channel(bot, fmt.weekly(r, cta=True))
+        ch = await _post_channel(bot, fmt.weekly(r, cta=True, narrative=narr))
         return f"sent to {sent} chats; channel={ch}"
 
     await _run_logged("weekly_recap", run, bot)

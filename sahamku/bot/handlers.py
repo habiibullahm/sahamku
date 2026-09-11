@@ -13,6 +13,7 @@ from aiogram.types import FSInputFile
 from sahamku import alerts, db
 from sahamku.analysis import aftermarket, premarket
 from sahamku.config import settings
+from sahamku.llm import narrative
 from sahamku.llm.ask import ask as llm_ask
 from sahamku.pipeline import load_joined
 from sahamku.report import chart
@@ -78,10 +79,12 @@ async def cmd_scan(m: types.Message) -> None:
     with db.db() as conn:
         watch = db.watch_list(conn, m.chat.id)
         r = aftermarket.build(conn, watch_codes=watch)
-    if not r:
-        await m.answer("Belum ada data. Jalankan backfill dulu.")
-        return
-    await m.answer(fmt.aftermarket(r))
+        if not r:
+            await m.answer("Belum ada data. Jalankan backfill dulu.")
+            return
+        narr = await narrative.get_or_create(
+            conn, "aftermarket", r.date, fmt.aftermarket(aftermarket.build(conn)))
+    await m.answer(fmt.aftermarket(r, narrative=narr))
 
 
 @router.message(Command("stock"))

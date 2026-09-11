@@ -40,6 +40,10 @@ def vol(v: float | None) -> str:
     return f"{v:,.0f}"
 
 
+def _narrative_block(text: str | None) -> list[str]:
+    return ["", f"💬 <i>{escape(text)}</i>"] if text else []
+
+
 def _mover_line(m: Mover) -> str:
     return f"  <code>{m.code}</code> {num(m.close)}  {pct(m.pct)}"
 
@@ -56,12 +60,14 @@ def _signal_block(items: list[TickerSignals], limit: int = 10) -> str:
     return "\n".join(lines)
 
 
-def aftermarket(r: AfterMarketReport, cta: bool = False) -> str:
+def aftermarket(r: AfterMarketReport, cta: bool = False,
+                narrative: str | None = None) -> str:
     parts = [
         f"📊 <b>Sahamku — After Market {r.date}</b>",
         "",
         f"<b>IHSG</b> {num(r.ihsg_close, 2)}  {pct(r.ihsg_pct)}",
         f"Vol {vol(r.ihsg_volume)} · ▲{r.advancers} ▼{r.decliners} •{r.unchanged} (LQ45)",
+        *_narrative_block(narrative),
         "",
         "🚀 <b>Top Gainers</b>",
         *(_mover_line(m) for m in r.gainers),
@@ -93,11 +99,13 @@ def aftermarket(r: AfterMarketReport, cta: bool = False) -> str:
     return _clip("\n".join(parts))
 
 
-def premarket(r: PreMarketReport, cta: bool = False) -> str:
+def premarket(r: PreMarketReport, cta: bool = False,
+              narrative: str | None = None) -> str:
     parts = [
         f"🌅 <b>Sahamku — Pre-Market {r.date}</b>",
         "",
         f"Sentimen pembukaan: <b>{r.sentiment_label}</b> (skor {r.sentiment_score:+d})",
+        *_narrative_block(narrative),
         "",
         "🌍 <b>Global semalam</b>",
         *(f"  {escape(name)}: {num(c, 2)} {pct(p)}" for name, c, p in r.global_rows),
@@ -123,7 +131,7 @@ def premarket(r: PreMarketReport, cta: bool = False) -> str:
     return _clip("\n".join(parts))
 
 
-def weekly(r: WeeklyReport, cta: bool = False) -> str:
+def weekly(r: WeeklyReport, cta: bool = False, narrative: str | None = None) -> str:
     def rate(v: float | None, n: int) -> str:
         return "—" if v is None else f"{v:.0f}% ({n} sinyal)"
 
@@ -132,6 +140,7 @@ def weekly(r: WeeklyReport, cta: bool = False) -> str:
         "",
         f"<b>IHSG</b> {num(r.ihsg_end, 2)}  {pct(r.ihsg_pct)} dalam {r.days} hari bursa",
         f"Range minggu ini {num(r.ihsg_low, 0)} – {num(r.ihsg_high, 0)}",
+        *_narrative_block(narrative),
         "",
         "🚀 <b>Top Gainers Mingguan</b>",
         *(_mover_line(m) for m in r.gainers),

@@ -75,6 +75,13 @@ CREATE TABLE IF NOT EXISTS alerts (
     created_at TEXT NOT NULL,
     triggered_at TEXT
 );
+CREATE TABLE IF NOT EXISTS narratives (
+    kind TEXT NOT NULL,
+    date TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (kind, date)
+);
 CREATE TABLE IF NOT EXISTS job_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT NOT NULL,
@@ -360,6 +367,20 @@ def close_at(conn: sqlite3.Connection, ticker: str, date_str: str) -> float | No
     row = conn.execute(
         "SELECT close FROM ohlcv WHERE ticker=? AND date=?", (ticker, date_str)).fetchone()
     return float(row["close"]) if row else None
+
+
+# ---------- narasi ----------
+
+def narrative_get(conn: sqlite3.Connection, kind: str, date_str: str) -> str | None:
+    row = conn.execute(
+        "SELECT text FROM narratives WHERE kind=? AND date=?", (kind, date_str)).fetchone()
+    return row["text"] if row else None
+
+
+def narrative_set(conn: sqlite3.Connection, kind: str, date_str: str, text: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO narratives (kind, date, text, created_at) VALUES (?,?,?,?)",
+        (kind, date_str, text, _now()))
 
 
 # ---------- job runs ----------

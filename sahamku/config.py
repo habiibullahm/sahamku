@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     bot_username: str = "sahamku_id_bot"
     # Kuota /ask per chat per hari (admin bebas kuota)
     ask_daily_limit: int = 10
+    # Narasi AI 2-3 kalimat di laporan (dibuat sekali per hari per jenis laporan)
+    narrative_enabled: bool = True
     db_path: Path = PROJECT_ROOT / "sahamku.db"
     charts_dir: Path = PROJECT_ROOT / "charts"
 
