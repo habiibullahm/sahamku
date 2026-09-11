@@ -65,6 +65,16 @@ CREATE TABLE IF NOT EXISTS ask_log (
     n INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (chat_id, day)
 );
+CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    metric TEXT NOT NULL,          -- close | rsi
+    op TEXT NOT NULL,              -- > | < | >= | <=
+    value REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    triggered_at TEXT
+);
 CREATE TABLE IF NOT EXISTS job_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT NOT NULL,
@@ -290,6 +300,66 @@ def watch_remove(conn: sqlite3.Connection, chat_id: int, code: str) -> bool:
 def watch_list(conn: sqlite3.Connection, chat_id: int) -> list[str]:
     return [r["code"] for r in conn.execute(
         "SELECT code FROM watchlist WHERE chat_id=? ORDER BY code", (chat_id,))]
+
+
+# ---------- alerts ----------
+
+def alert_add(conn: sqlite3.Connection, chat_id: int, code: str, metric: str, op: str,
+              value: float) -> int:
+    cur = conn.execute(
+        "INSERT INTO alerts (chat_id, code, metric, op, value, created_at) VALUES (?,?,?,?,?,?)",
+        (chat_id, code.upper(), metric, op, value, _now()))
+    return cur.lastrowid
+
+
+def alert_list(conn: sqlite3.Connection, chat_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, code, metric, op, value FROM alerts "
+        "WHERE chat_id=? AND triggered_at IS NULL ORDER BY id", (chat_id,)).fetchall()
+
+
+def alert_count(conn: sqlite3.Connection, chat_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM alerts WHERE chat_id=? AND triggered_at IS NULL",
+        (chat_id,)).fetchone()[0]
+
+
+def alert_remove(conn: sqlite3.Connection, chat_id: int, alert_id: int) -> bool:
+    cur = conn.execute(
+        "DELETE FROM alerts WHERE id=? AND chat_id=? AND triggered_at IS NULL",
+        (alert_id, chat_id))
+    return cur.rowcount > 0
+
+
+def alerts_active(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, chat_id, code, metric, op, value FROM alerts "
+        "WHERE triggered_at IS NULL ORDER BY code").fetchall()
+
+
+def alert_mark_triggered(conn: sqlite3.Connection, alert_id: int) -> None:
+    conn.execute("UPDATE alerts SET triggered_at=? WHERE id=?", (_now(), alert_id))
+
+
+# ---------- mingguan ----------
+
+def trading_dates_between(conn: sqlite3.Connection, start: str, end: str) -> list[str]:
+    rows = conn.execute(
+        "SELECT DISTINCT date FROM ohlcv WHERE date BETWEEN ? AND ? ORDER BY date",
+        (start, end)).fetchall()
+    return [r["date"] for r in rows]
+
+
+def ratings_between(conn: sqlite3.Connection, start: str, end: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT ticker, date, score, rating FROM ratings WHERE date BETWEEN ? AND ? "
+        "AND rating != 'netral' ORDER BY date", (start, end)).fetchall()
+
+
+def close_at(conn: sqlite3.Connection, ticker: str, date_str: str) -> float | None:
+    row = conn.execute(
+        "SELECT close FROM ohlcv WHERE ticker=? AND date=?", (ticker, date_str)).fetchone()
+    return float(row["close"]) if row else None
 
 
 # ---------- job runs ----------

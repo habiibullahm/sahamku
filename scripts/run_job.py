@@ -1,6 +1,6 @@
 """Jalankan satu job secara manual (tanpa Telegram, output ke stdout).
 
-Usage: python scripts/run_job.py eod|global|compute|premarket|aftermarket|chart [KODE]
+Usage: python scripts/run_job.py eod|global|compute|premarket|aftermarket|weekly|chart [KODE]
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sahamku import db  # noqa: E402
-from sahamku.analysis import aftermarket, premarket  # noqa: E402
+from sahamku.analysis import aftermarket, premarket, weekly  # noqa: E402
 from sahamku.ingestion.eod import ingest, validate_eod  # noqa: E402
 from sahamku.ingestion.global_ import ingest_global  # noqa: E402
 from sahamku.pipeline import load_joined, recompute_all  # noqa: E402
@@ -46,6 +46,9 @@ def main() -> None:
             case "premarket":
                 r = premarket.build(conn, watch_codes=["BBCA", "TLKM"])
                 print(_strip(fmt.premarket(r)) if r else "no data")
+            case "weekly":
+                r = weekly.build(conn)
+                print(_strip(fmt.weekly(r)) if r else "no data")
             case "chart":
                 code = (sys.argv[2] if len(sys.argv) > 2 else "BBCA").upper()
                 print(chart.render(code, load_joined(conn, to_yf(code))))

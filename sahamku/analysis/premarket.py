@@ -82,7 +82,7 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
     # Level IHSG: support/resistance dari swing 20 hari + trend vs SMA
     support = float(joined["low"].tail(20).min())
     resistance = float(joined["high"].tail(20).max())
-    trend = _trend_label(last)
+    trend = trend_label(last)
 
     # Sinyal dari scan kemarin
     bull, bear = [], []
@@ -106,7 +106,7 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
     )
 
 
-def _trend_label(row: pd.Series) -> str:
+def trend_label(row: pd.Series) -> str:
     c, s20, s50, s200 = row["close"], row["sma20"], row["sma50"], row["sma200"]
     if pd.isna(s200):
         return "data SMA200 belum cukup"

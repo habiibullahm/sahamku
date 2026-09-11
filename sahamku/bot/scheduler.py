@@ -12,8 +12,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-from sahamku import db
-from sahamku.analysis import aftermarket, premarket
+from sahamku import alerts, db
+from sahamku.analysis import aftermarket, premarket, weekly
 from sahamku.config import TZ, settings
 from sahamku.ingestion.eod import ingest, validate_eod
 from sahamku.ingestion.global_ import ingest_global
@@ -130,6 +130,8 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
             await asyncio.to_thread(ingest, conn)
             ok, missing = validate_eod(conn, today)
             await asyncio.to_thread(recompute_all, conn)
+            if ok:
+                await _send_alerts(bot, conn)
         now = datetime.now(TZ)
         deadline = now.replace(hour=EOD_DEADLINE[0], minute=EOD_DEADLINE[1], second=0)
         if not ok and now + timedelta(minutes=EOD_RETRY_MINUTES) <= deadline:
@@ -184,6 +186,48 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
     await _run_logged("send_aftermarket", run, bot)
 
 
+async def _send_alerts(bot: Bot, conn) -> int:
+    sent = 0
+    for t in alerts.check_all(conn):
+        try:
+            await bot.send_message(t.chat_id, fmt.alert_triggered(
+                t.spec.code, t.spec.label(), t.actual, t.spec.metric, t.date))
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            log.warning("gagal kirim alert #%s ke %s", t.alert_id, t.chat_id, exc_info=True)
+    if sent:
+        log.info("alerts sent: %d", sent)
+    return sent
+
+
+async def job_weekly_recap(bot: Bot) -> None:
+    async def run():
+        with db.db() as conn:
+            r = weekly.build(conn)
+            if not r:
+                return "no data"
+            ids = set(db.subscribed_chat_ids(conn))
+            if settings.admin_chat_id:
+                ids.add(settings.admin_chat_id)
+        text = fmt.weekly(r)
+        sent = 0
+        for cid in ids:
+            try:
+                await bot.send_message(cid, text)
+                sent += 1
+                await asyncio.sleep(0.05)
+            except TelegramForbiddenError:
+                with db.db() as conn:
+                    db.set_subscribed(conn, cid, False)
+            except Exception:
+                log.warning("gagal kirim rekap ke %s", cid, exc_info=True)
+        ch = await _post_channel(bot, fmt.weekly(r, cta=True))
+        return f"sent to {sent} chats; channel={ch}"
+
+    await _run_logged("weekly_recap", run, bot)
+
+
 async def job_weekly_backtest(bot: Bot) -> None:
     from sahamku.backtest.run import run_backtest, summary_text
 
@@ -213,6 +257,8 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
                 args=[bot], id="premarket")
     sch.add_job(job_eod_pipeline, CronTrigger(day_of_week="mon-fri", hour=eod_h, minute=eod_m),
                 args=[bot, sch], id="eod_pipeline")
-    sch.add_job(job_weekly_backtest, CronTrigger(day_of_week="sat", hour=9, minute=0),
+    sch.add_job(job_weekly_recap, CronTrigger(day_of_week="sat", hour=9, minute=0),
+                args=[bot], id="weekly_recap")
+    sch.add_job(job_weekly_backtest, CronTrigger(day_of_week="sat", hour=9, minute=15),
                 args=[bot], id="weekly_backtest")
     return sch

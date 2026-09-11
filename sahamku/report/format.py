@@ -6,6 +6,7 @@ from html import escape
 
 from sahamku.analysis.aftermarket import AfterMarketReport, Mover, TickerSignals
 from sahamku.analysis.premarket import PreMarketReport
+from sahamku.analysis.weekly import WeeklyReport
 from sahamku.config import DISCLAIMER, settings
 from sahamku.signals.scoring import RATING_EMOJI
 
@@ -120,6 +121,60 @@ def premarket(r: PreMarketReport, cta: bool = False) -> str:
         parts += ["", cta_line()]
     parts += ["", f"<i>{DISCLAIMER}</i>"]
     return _clip("\n".join(parts))
+
+
+def weekly(r: WeeklyReport, cta: bool = False) -> str:
+    def rate(v: float | None, n: int) -> str:
+        return "—" if v is None else f"{v:.0f}% ({n} sinyal)"
+
+    parts = [
+        f"🗓 <b>Sahamku — Rekap Minggu {r.week_start} s/d {r.week_end}</b>",
+        "",
+        f"<b>IHSG</b> {num(r.ihsg_end, 2)}  {pct(r.ihsg_pct)} dalam {r.days} hari bursa",
+        f"Range minggu ini {num(r.ihsg_low, 0)} – {num(r.ihsg_high, 0)}",
+        "",
+        "🚀 <b>Top Gainers Mingguan</b>",
+        *(_mover_line(m) for m in r.gainers),
+        "",
+        "📉 <b>Top Losers Mingguan</b>",
+        *(_mover_line(m) for m in r.losers),
+        "",
+        "🎯 <b>Akurasi Sinyal Minggu Ini</b> (return s/d close Jumat)",
+        f"  🟢 Bullish tepat: {rate(r.bull_hit_rate, len(r.bull_hits))}",
+        f"  🔴 Bearish tepat: {rate(r.bear_hit_rate, len(r.bear_hits))}",
+        f"  Total sinyal: {r.n_bullish} bullish · {r.n_bearish} bearish",
+    ]
+    if cta:
+        parts += ["", cta_line()]
+    parts += ["", f"<i>{DISCLAIMER}</i>"]
+    return _clip("\n".join(parts))
+
+
+def ihsg_snapshot(date: str, close: float, pct_: float | None, volume: float,
+                  ind: dict[str, float | None], support: float, resistance: float,
+                  trend: str) -> str:
+    lines = [
+        f"🇮🇩 <b>IHSG</b> — {date}",
+        f"Close {num(close, 2)}  {pct(pct_)} · Vol {vol(volume)}",
+        "",
+        f"<b>Support</b> {num(support)} · <b>Resistance</b> {num(resistance)} (20 hari)",
+        f"Tren: {escape(trend)}",
+        "",
+        "<b>Indikator</b>",
+        f"  SMA20 {num(ind.get('sma20'))} · SMA50 {num(ind.get('sma50'))} · "
+        f"SMA200 {num(ind.get('sma200'))}",
+        f"  RSI14 {num(ind.get('rsi14'), 1)} · MACD {num(ind.get('macd'), 1)} "
+        f"(sig {num(ind.get('macd_signal'), 1)})",
+        "",
+        f"<i>{DISCLAIMER}</i>",
+    ]
+    return _clip("\n".join(lines))
+
+
+def alert_triggered(code: str, label: str, actual: float, metric: str, date: str) -> str:
+    val = f"{actual:,.0f}" if metric == "close" else f"{actual:.1f}"
+    return (f"🔔 <b>Alert {code}</b> ({date})\n{escape(label)} — sekarang <b>{val}</b>\n"
+            f"Lihat detail: /stock {code}")
 
 
 def stock_snapshot(code: str, date: str, close: float, pct_: float | None, volume: float,

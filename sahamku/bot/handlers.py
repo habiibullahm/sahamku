@@ -10,15 +10,15 @@ from aiogram import F, Router, types
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import FSInputFile
 
-from sahamku import db
-from sahamku.analysis import aftermarket
+from sahamku import alerts, db
+from sahamku.analysis import aftermarket, premarket
 from sahamku.config import settings
 from sahamku.llm.ask import ask as llm_ask
 from sahamku.pipeline import load_joined
 from sahamku.report import chart
 from sahamku.report import format as fmt
 from sahamku.signals.rules import RULE_LABELS
-from sahamku.universe import is_known_code, to_yf
+from sahamku.universe import IHSG, is_known_code, to_yf
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -32,6 +32,9 @@ HELP = """<b>Sahamku</b> — daily scan saham LQ45
 /watch KODE — tambah ke watchlist
 /unwatch KODE — hapus dari watchlist
 /watchlist — lihat watchlist
+/ihsg — snapshot IHSG + chart + support/resistance
+/alert KODE > HARGA — alert level (contoh: /alert BBCA > 6500, /alert BBRI rsi < 30)
+/alerts — daftar alert · /unalert ID — hapus alert
 /ask pertanyaan — tanya AI (contoh: /ask kenapa BBCA turun?)
 /stop — berhenti menerima laporan otomatis · /resume — aktifkan lagi
 
@@ -116,6 +119,72 @@ async def cmd_stock(m: types.Message, command: CommandObject) -> None:
     # caption Telegram maks 1024 char → kirim chart dan teks terpisah
     await m.answer_photo(FSInputFile(png))
     await m.answer(text)
+
+
+@router.message(Command("ihsg"))
+async def cmd_ihsg(m: types.Message) -> None:
+    with db.db() as conn:
+        j = load_joined(conn, IHSG)
+    if j.empty:
+        await m.answer("Data IHSG belum tersedia.")
+        return
+    last = j.iloc[-1]
+    date_str = j.index[-1].strftime("%Y-%m-%d")
+    pct = (last["close"] / j["close"].iloc[-2] - 1) * 100 if len(j) > 1 else None
+    ind = {k: (None if last[k] != last[k] else float(last[k]))
+           for k in ("sma20", "sma50", "sma200", "rsi14", "macd", "macd_signal")}
+    text = fmt.ihsg_snapshot(
+        date_str, float(last["close"]), pct, float(last["volume"]), ind,
+        float(j["low"].tail(20).min()), float(j["high"].tail(20).max()),
+        premarket.trend_label(last),
+    )
+    async with _chart_lock:
+        png = await asyncio.to_thread(chart.render, "IHSG", j)
+    await m.answer_photo(FSInputFile(png))
+    await m.answer(text)
+
+
+@router.message(Command("alert"))
+async def cmd_alert(m: types.Message, command: CommandObject) -> None:
+    spec = alerts.parse(command.args or "")
+    if isinstance(spec, str):
+        await m.answer(spec)
+        return
+    with db.db() as conn:
+        db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
+        if db.alert_count(conn, m.chat.id) >= alerts.MAX_ALERTS_PER_CHAT:
+            await m.answer(f"Maksimal {alerts.MAX_ALERTS_PER_CHAT} alert aktif. "
+                           "Hapus dulu dengan /unalert ID.")
+            return
+        aid = db.alert_add(conn, m.chat.id, spec.code, spec.metric, spec.op, spec.value)
+    await m.answer(f"🔔 Alert #{aid} dibuat: <b>{escape(spec.label())}</b>\n"
+                   "Dicek setiap hari bursa setelah penutupan (±16:45 WIB), sekali kirim.")
+
+
+@router.message(Command("alerts"))
+async def cmd_alerts(m: types.Message) -> None:
+    with db.db() as conn:
+        rows = db.alert_list(conn, m.chat.id)
+    if not rows:
+        await m.answer("Belum ada alert. Buat dengan /alert KODE > HARGA.")
+        return
+    lines = ["🔔 <b>Alert aktif</b>"]
+    for r in rows:
+        spec = alerts.AlertSpec(r["code"], r["metric"], r["op"], float(r["value"]))
+        lines.append(f"  #{r['id']} — {escape(spec.label())}")
+    lines.append("\nHapus: /unalert ID")
+    await m.answer("\n".join(lines))
+
+
+@router.message(Command("unalert"))
+async def cmd_unalert(m: types.Message, command: CommandObject) -> None:
+    arg = (command.args or "").strip().lstrip("#")
+    if not arg.isdigit():
+        await m.answer("Format: /unalert ID (lihat /alerts)")
+        return
+    with db.db() as conn:
+        ok = db.alert_remove(conn, m.chat.id, int(arg))
+    await m.answer(f"🗑 Alert #{arg} dihapus." if ok else f"Alert #{arg} tidak ditemukan.")
 
 
 @router.message(Command("watch"))
