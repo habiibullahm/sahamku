@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from sahamku.config import settings
+
 IHSG = "^JKSE"
 
 # LQ45 (perlu update tiap rebalancing Feb/Agu — cek pengumuman BEI)
@@ -14,6 +16,17 @@ LQ45 = [
     "MBMA", "MDKA", "MEDC", "MTEL", "PGAS", "PGEO", "PTBA", "SIDO", "SMGR", "SMRA",
     "TLKM", "TOWR", "UNTR", "UNVR", "MAPA",
 ]
+
+# Tambahan konstituen IDX80 di luar LQ45 (best-effort; verifikasi dengan pengumuman BEI)
+IDX80_EXTRA = [
+    "AADI", "AALI", "ADMR", "AVIA", "BFIN", "BREN", "BRMS", "BSDE", "BTPS", "CMRY",
+    "CUAN", "DSSA", "ELSA", "ENRG", "ERAA", "GGRM", "HEAL", "HRUM", "INTP", "JPFA",
+    "LSIP", "MIKA", "MNCN", "MYOR", "NCKL", "PANI", "PNLF", "PTPP", "PWON", "SCMA",
+    "SRTG", "SSIA", "TINS", "TKIM", "TPIA",
+]
+
+# Universe aktif ditentukan oleh UNIVERSE=lq45|idx80 di .env
+STOCKS: list[str] = LQ45 + (IDX80_EXTRA if settings.universe.lower() == "idx80" else [])
 
 
 # Alias nama perusahaan (lowercase-insensitive) untuk deteksi berita
@@ -35,6 +48,16 @@ NAME_ALIASES: dict[str, list[str]] = {
     "PTBA": ["Bukit Asam"], "SIDO": ["Sido Muncul"], "SMGR": ["Semen Indonesia"],
     "SMRA": ["Summarecon"], "TLKM": ["Telkom Indonesia", "Telkom"], "TOWR": ["Sarana Menara"],
     "UNTR": ["United Tractors"], "UNVR": ["Unilever Indonesia"],
+    "AALI": ["Astra Agro"], "BSDE": ["Bumi Serpong", "BSD"], "BTPS": ["BTPN Syariah"],
+    "CMRY": ["Cimory"], "ELSA": ["Elnusa"], "ERAA": ["Erajaya"], "GGRM": ["Gudang Garam"],
+    "HRUM": ["Harum Energy"], "INTP": ["Indocement"], "JPFA": ["Japfa"], "MIKA": ["Mitra Keluarga"],
+    "MNCN": ["MNC"], "MYOR": ["Mayora"], "NCKL": ["Trimegah Bangun", "Harita Nickel"],
+    "PANI": ["Pantai Indah Kapuk", "PIK 2"], "PTPP": ["PT PP", "PP Persero"], "PWON": ["Pakuwon"],
+    "SCMA": ["Surya Citra"], "SRTG": ["Saratoga"], "TINS": ["Timah"], "TKIM": ["Tjiwi Kimia"],
+    "TPIA": ["Chandra Asri"], "BREN": ["Barito Renewables"], "CUAN": ["Petrindo"],
+    "DSSA": ["Dian Swastatika"], "AVIA": ["Avian"], "BFIN": ["BFI Finance"], "HEAL": ["Hermina"],
+    "LSIP": ["London Sumatra"], "PNLF": ["Panin Financial"], "SSIA": ["Surya Semesta"],
+    "ADMR": ["Adaro Minerals"], "AADI": ["Adaro Andalan"], "BRMS": ["Bumi Resources Minerals"],
 }
 
 
@@ -48,10 +71,10 @@ def from_yf(ticker: str) -> str:
 
 
 def is_known_code(code: str) -> bool:
-    return code.upper() in LQ45
+    return code.upper() in STOCKS
 
 
-STOCK_TICKERS = [to_yf(c) for c in LQ45]
+STOCK_TICKERS = [to_yf(c) for c in STOCKS]
 ALL_EOD_TICKERS = [IHSG, *STOCK_TICKERS]
 
 # Aset global untuk analisis pre-market

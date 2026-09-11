@@ -10,7 +10,7 @@ import sqlite3
 
 from sahamku import db
 from sahamku.llm.providers import generate
-from sahamku.universe import LQ45, NAME_ALIASES
+from sahamku.universe import NAME_ALIASES, STOCKS
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ _OBJ = re.compile(r"\{[^{}]*\}")
 
 def _system() -> str:
     aliases = "; ".join(f"{k}={'/'.join(v[:2])}" for k, v in NAME_ALIASES.items())
-    return SYSTEM.format(codes=", ".join(LQ45), aliases=aliases)
+    return SYSTEM.format(codes=", ".join(STOCKS), aliases=aliases)
 
 
 def _parse(text: str) -> list[dict]:
@@ -81,7 +81,7 @@ async def analyze_pending(conn: sqlite3.Connection, limit: int = 120) -> int:
             d = by_i.get(i)
             if not d:
                 continue
-            tickers = [t for t in (d.get("tickers") or []) if isinstance(t, str) and t in LQ45]
+            tickers = [t for t in (d.get("tickers") or []) if isinstance(t, str) and t in STOCKS]
             # gabung dengan deteksi rule-based (ticker eksplisit di judul)
             for t in (r["tickers"] or "").split(","):
                 if t and t not in tickers:

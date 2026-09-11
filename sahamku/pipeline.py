@@ -11,7 +11,7 @@ from sahamku import db
 from sahamku.indicators.technical import compute
 from sahamku.signals.rules import evaluate_latest
 from sahamku.signals.scoring import score_and_rate
-from sahamku.universe import STOCK_TICKERS
+from sahamku.universe import ALL_EOD_TICKERS, STOCK_TICKERS
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +38,22 @@ def process_ticker(conn: sqlite3.Connection, ticker: str, store_indicator_rows: 
     db.replace_signals(conn, ticker, date_str, [(s.rule, s.direction, s.detail) for s in sigs])
     sc, rt = score_and_rate(sigs)
     db.upsert_rating(conn, ticker, date_str, sc, rt)
+
+
+def ensure_history(conn: sqlite3.Connection, min_bars: int = 250) -> list[str]:
+    """Backfill 3 tahun untuk ticker yang belum punya histori (mis. setelah universe diperluas)."""
+    from sahamku.ingestion.eod import backfill
+
+    missing = []
+    for t in ALL_EOD_TICKERS:
+        n = conn.execute("SELECT COUNT(*) FROM ohlcv WHERE ticker=?", (t,)).fetchone()[0]
+        if n < min_bars:
+            missing.append(t)
+    if missing:
+        log.info("backfill %d ticker baru: %s", len(missing), ", ".join(missing))
+        backfill(conn, missing)
+        recompute_all(conn, missing)
+    return missing
 
 
 def recompute_all(conn: sqlite3.Connection, tickers: list[str] | None = None) -> int:

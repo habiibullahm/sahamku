@@ -8,9 +8,9 @@ from html import escape
 
 from aiogram import F, Router, types
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import FSInputFile
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
-from sahamku import alerts, db, news, screener
+from sahamku import alerts, db, levels, news, screener
 from sahamku.analysis import aftermarket, premarket
 from sahamku.config import settings
 from sahamku.llm import narrative
@@ -19,14 +19,14 @@ from sahamku.pipeline import load_joined
 from sahamku.report import chart
 from sahamku.report import format as fmt
 from sahamku.signals.rules import RULE_LABELS
-from sahamku.universe import IHSG, is_known_code, to_yf
+from sahamku.universe import IHSG, STOCKS, is_known_code, to_yf
 
 log = logging.getLogger(__name__)
 router = Router()
 # matplotlib/pyplot tidak thread-safe → render chart satu per satu
 _chart_lock = asyncio.Lock()
 
-HELP = """<b>Sahamku</b> — daily scan saham LQ45
+HELP = """<b>Sahamku</b> — daily scan saham IHSG
 
 /scan — laporan after-market terbaru
 /stock KODE — snapshot + chart (contoh: /stock BBCA)
@@ -39,6 +39,7 @@ HELP = """<b>Sahamku</b> — daily scan saham LQ45
 /alert KODE > HARGA — alert level (contoh: /alert BBCA > 6500, /alert BBRI rsi < 30)
 /alerts — daftar alert · /unalert ID — hapus alert
 /ask pertanyaan — tanya AI (contoh: /ask kenapa BBCA turun?)
+/settings — atur laporan mana yang diterima
 /stop — berhenti menerima laporan otomatis · /resume — aktifkan lagi
 
 Laporan otomatis: pre-market 08:15 & after-market 17:00 WIB (hari bursa).
@@ -96,7 +97,7 @@ async def cmd_stock(m: types.Message, command: CommandObject) -> None:
         await m.answer("Format: /stock KODE (contoh: /stock BBCA)")
         return
     if not is_known_code(code):
-        await m.answer(f"{code} tidak ada di universe LQ45.")
+        await m.answer(f"{code} tidak ada di universe ({len(STOCKS)} saham).")
         return
     t = to_yf(code)
     with db.db() as conn:
@@ -117,16 +118,119 @@ async def cmd_stock(m: types.Message, command: CommandObject) -> None:
                      "bb_lower", "bb_upper", "atr14")}
     with db.db() as conn:
         heads = news.headlines(conn, hours=72, code=code, limit=3)
+        watching = code in db.watch_list(conn, m.chat.id)
     text = fmt.stock_snapshot(
         code, date_str, float(last["close"]), pct, float(last["volume"]), ind,
         rating["rating"] if rating else None, rating["score"] if rating else None, rules,
-        headlines=heads,
+        headlines=heads, sr=levels.describe(levels.compute(j)),
     )
     async with _chart_lock:
         png = await asyncio.to_thread(chart.render, code, j)
     # caption Telegram maks 1024 char → kirim chart dan teks terpisah
     await m.answer_photo(FSInputFile(png))
-    await m.answer(text)
+    await m.answer(text, reply_markup=_stock_keyboard(code, watching))
+
+
+def _stock_keyboard(code: str, watching: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📰 Berita", callback_data=f"news:{code}"),
+        InlineKeyboardButton(text=("👀 Unwatch" if watching else "👀 Watch"),
+                             callback_data=f"watch:{code}"),
+        InlineKeyboardButton(text="🤖 Tanya AI", callback_data=f"ask:{code}"),
+    ]])
+
+
+@router.callback_query(F.data.startswith("news:"))
+async def cb_news(cq: CallbackQuery) -> None:
+    code = cq.data.split(":", 1)[1]
+    with db.db() as conn:
+        items = news.headlines(conn, hours=72, code=code, limit=8)
+    await cq.message.answer(fmt.news_list(code, items, 72))
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("watch:"))
+async def cb_watch(cq: CallbackQuery) -> None:
+    code = cq.data.split(":", 1)[1]
+    chat_id = cq.message.chat.id
+    with db.db() as conn:
+        db.upsert_user(conn, chat_id, cq.from_user.username if cq.from_user else None)
+        if code in db.watch_list(conn, chat_id):
+            db.watch_remove(conn, chat_id, code)
+            watching, note = False, f"{code} dihapus dari watchlist"
+        else:
+            db.watch_add(conn, chat_id, code)
+            watching, note = True, f"{code} ditambahkan ke watchlist"
+    try:
+        await cq.message.edit_reply_markup(reply_markup=_stock_keyboard(code, watching))
+    except Exception:
+        pass
+    await cq.answer(note)
+
+
+@router.callback_query(F.data.startswith("ask:"))
+async def cb_ask(cq: CallbackQuery) -> None:
+    code = cq.data.split(":", 1)[1]
+    await cq.answer()
+    await _run_ask(cq.message, cq.message.chat.id,
+                   f"Analisis singkat {code}: kondisi teknikal saat ini, level penting, "
+                   f"dan skenario yang perlu diperhatikan.")
+
+
+@router.callback_query(F.data.startswith("pref:"))
+async def cb_pref(cq: CallbackQuery) -> None:
+    key = cq.data.split(":", 1)[1]
+    chat_id = cq.message.chat.id
+    with db.db() as conn:
+        if key in db.PREF_KEYS:
+            db.prefs_toggle(conn, chat_id, key)
+        prefs, sub = db.prefs_get(conn, chat_id), db.is_subscribed(conn, chat_id)
+    try:
+        await cq.message.edit_text(fmt.settings_text(prefs, sub),
+                                   reply_markup=_settings_keyboard(prefs))
+    except Exception:
+        pass
+    await cq.answer("Tersimpan")
+
+
+def _settings_keyboard(prefs: dict[str, bool]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(
+        text=f"{'✅' if prefs[k] else '⬜'} {label}", callback_data=f"pref:{k}")]
+        for k, label in fmt.PREF_LABELS.items()]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(Command("settings"))
+async def cmd_settings(m: types.Message) -> None:
+    with db.db() as conn:
+        db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
+        prefs, sub = db.prefs_get(conn, m.chat.id), db.is_subscribed(conn, m.chat.id)
+    await m.answer(fmt.settings_text(prefs, sub), reply_markup=_settings_keyboard(prefs))
+
+
+@router.message(Command("admin"))
+async def cmd_admin(m: types.Message, command: CommandObject) -> None:
+    if m.chat.id != settings.admin_chat_id:
+        await m.answer("Perintah ini hanya untuk admin.")
+        return
+    args = (command.args or "").strip()
+    sub, _, rest = args.partition(" ")
+    with db.db() as conn:
+        if sub == "broadcast" and rest.strip():
+            ids = db.subscribed_chat_ids(conn)
+            sent = 0
+            for cid in ids:
+                try:
+                    await m.bot.send_message(cid, f"📣 {escape(rest.strip())}")
+                    sent += 1
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    log.warning("broadcast gagal ke %s", cid, exc_info=True)
+            await m.answer(f"Broadcast terkirim ke {sent}/{len(ids)} user.")
+            return
+        st, jobs = db.admin_stats(conn), db.job_runs_recent(conn)
+    await m.answer(fmt.admin_stats_text(st, jobs) +
+                   "\n\nPerintah: /admin · /admin broadcast &lt;pesan&gt;")
 
 
 @router.message(Command("ihsg"))
@@ -144,7 +248,7 @@ async def cmd_ihsg(m: types.Message) -> None:
     text = fmt.ihsg_snapshot(
         date_str, float(last["close"]), pct, float(last["volume"]), ind,
         float(j["low"].tail(20).min()), float(j["high"].tail(20).max()),
-        premarket.trend_label(last),
+        premarket.trend_label(last), sr=levels.describe(levels.compute(j)),
     )
     async with _chart_lock:
         png = await asyncio.to_thread(chart.render, "IHSG", j)
@@ -261,22 +365,33 @@ async def cmd_watchlist(m: types.Message) -> None:
 async def cmd_ask(m: types.Message, command: CommandObject) -> None:
     q = (command.args or "").strip()
     if not q:
-        await m.answer("Format: /ask pertanyaan (contoh: /ask kenapa BBCA turun?)")
+        await m.answer("Format: /ask pertanyaan (contoh: /ask kenapa BBCA turun?)\n"
+                       "Pertanyaan lanjutan boleh tanpa kode saham (bot ingat 2 jam). "
+                       "/ask clear untuk mulai percakapan baru.")
         return
-    is_admin = settings.admin_chat_id == m.chat.id
+    if q.lower() in ("clear", "reset"):
+        with db.db() as conn:
+            db.ask_history_clear(conn, m.chat.id)
+        await m.answer("🧹 Riwayat percakapan /ask dihapus.")
+        return
+    await _run_ask(m, m.chat.id, q)
+
+
+async def _run_ask(m: types.Message, chat_id: int, q: str) -> None:
+    is_admin = settings.admin_chat_id == chat_id
     with db.db() as conn:
-        used = db.ask_count_today(conn, m.chat.id)
+        used = db.ask_count_today(conn, chat_id)
         if not is_admin and used >= settings.ask_daily_limit:
             await m.answer(f"⏳ Kuota /ask hari ini habis ({settings.ask_daily_limit}/hari). "
                            "Coba lagi besok, atau lihat /stock KODE dan /scan.")
             return
         if not is_admin:
-            used = db.ask_increment(conn, m.chat.id)
+            used = db.ask_increment(conn, chat_id)
     sisa = "" if is_admin else f" · sisa kuota {settings.ask_daily_limit - used}"
     thinking = await m.answer(f"🤔 Menganalisis…{sisa}")
     try:
         with db.db() as conn:
-            answer = await llm_ask(conn, q)
+            answer = await llm_ask(conn, q, chat_id=chat_id)
     except Exception:
         log.exception("ask failed")
         answer = "❌ Terjadi kesalahan saat memproses pertanyaan."

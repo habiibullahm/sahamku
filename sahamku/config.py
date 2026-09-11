@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # Channel publik untuk broadcast laporan (mis. "@sahamku_id"); bot harus admin channel
     channel_id: str | None = None
     bot_username: str = "sahamku_id_bot"
+    # Universe saham: lq45 | idx80
+    universe: str = "lq45"
     # Kuota /ask per chat per hari (admin bebas kuota)
     ask_daily_limit: int = 10
     # Narasi AI 2-3 kalimat di laporan (dibuat sekali per hari per jenis laporan)

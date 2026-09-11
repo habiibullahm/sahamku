@@ -58,17 +58,24 @@ docker compose down              # hentikan
 | `/scan` | Laporan after-market dari data terakhir |
 | `/stock BBCA` | Snapshot harga, indikator, rating, sinyal + chart 60 hari |
 | `/watch BBCA` / `/unwatch BBCA` / `/watchlist` | Watchlist per chat; ikut dilaporkan di pre/after-market |
-| `/ask kenapa BBCA turun?` | Tanya Claude dengan konteks harga, indikator, sinyal, dan sentimen global |
+| `/ask kenapa BBCA turun?` | Tanya AI dengan konteks harga, indikator, sinyal, S/R, berita; ingat percakapan 2 jam (`/ask clear`) |
+| `/ihsg` | Snapshot IHSG + chart + support/resistance |
+| `/news [KODE]` | Berita pasar/emiten dengan sentimen (🟢🔴⚪) |
+| `/screener rsi<35 above200` | Filter saham (rating, rsi, chg, vol, squeeze, breakout, golden, …) |
+| `/alert BBCA > 6500` / `/alerts` / `/unalert ID` | Alert level harga/RSI, dicek setelah close |
+| `/settings` | Pilih laporan yang diterima (pre-market, after-market, mingguan, alert) |
+| `/stop` / `/resume` | Matikan/aktifkan semua laporan otomatis |
+| `/admin`, `/admin broadcast <pesan>` | Statistik & broadcast (hanya `ADMIN_CHAT_ID`) |
 
 ## Jadwal (WIB, hari bursa; libur di `sahamku/universe.py`)
 
 | Jam | Job |
 |---|---|
-| 07:30 | Ingest aset global (Wall Street, Asia, minyak, emas, USD/IDR, UST10Y) |
+| 07:30 · 07:45 | Ingest aset global · ingest & analisis berita (Wall Street, Asia, minyak, emas, USD/IDR, UST10Y) |
 | 08:15 | Kirim laporan pre-market (sentimen global, level S/R IHSG, sinyal kemarin, watchlist) |
-| 16:30 | Ingest EOD LQ45+IHSG → validasi → indikator → sinyal. Retry tiap 15 menit s/d 18:00 jika belum lengkap |
+| 16:10 · 16:30 | Berita · ingest EOD LQ45+IHSG → validasi → indikator → sinyal. Retry tiap 15 menit s/d 18:00 jika belum lengkap |
 | 17:00 | Kirim laporan after-market (IHSG, top movers, sinyal bullish/bearish, squeeze, watchlist) |
-| Sabtu 09:00 | Backtest mingguan → ringkasan ke admin |
+| Sabtu 09:00 · 09:15 | Rekap mingguan (user & channel) · backtest ke admin |
 
 Untuk uji cepat, set `SCHEDULE_OVERRIDE_AFTERMARKET=HH:MM` / `SCHEDULE_OVERRIDE_PREMARKET=HH:MM`
 di `.env` (ingest EOD otomatis dijalankan 2 menit sebelum jam kirim).
@@ -127,5 +134,6 @@ tests/
 
 - Data dari Yahoo Finance (gratis, EOD). Bisa telat/gap — `validate_eod` + retry menanganinya; laporan
   parsial diberi tanda ticker yang hilang.
-- Daftar LQ45 & libur bursa perlu diperbarui manual (rebalancing Feb/Agu; SK libur tahunan BEI).
+- Daftar LQ45/IDX80 & libur bursa perlu diperbarui manual (rebalancing Feb/Agu; SK libur tahunan BEI).
+  Universe dipilih lewat `UNIVERSE=lq45|idx80`; ticker baru di-backfill otomatis saat bot start.
 - `.env`, `*.db`, dan `charts/` tidak di-commit.

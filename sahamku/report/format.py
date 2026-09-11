@@ -71,6 +71,42 @@ def screener_result(date: str, q: Query, rows) -> str:
     return _clip("\n".join(lines))
 
 
+PREF_LABELS = {
+    "premarket": "🌅 Pre-market 08:15", "aftermarket": "📊 After-market 17:00",
+    "weekly": "🗓 Rekap mingguan", "alerts": "🔔 Alert level",
+}
+
+
+def settings_text(prefs: dict[str, bool], subscribed: bool) -> str:
+    lines = ["⚙️ <b>Pengaturan laporan</b>", ""]
+    if not subscribed:
+        lines.append("🔕 Semua laporan otomatis nonaktif (/resume untuk mengaktifkan).")
+        lines.append("")
+    for k, label in PREF_LABELS.items():
+        lines.append(f"{'✅' if prefs[k] else '⬜'} {label}")
+    lines += ["", "Ketuk tombol untuk mengubah. Kuota /ask dan watchlist diatur terpisah."]
+    return "\n".join(lines)
+
+
+def admin_stats_text(st: dict, jobs) -> str:
+    lines = [
+        "🛠 <b>Admin — statistik</b>",
+        f"User {st['users']} · subscribed {st['subscribed']} · "
+        f"punya watchlist {st['with_watchlist']} ({st['watch_rows']} entri)",
+        f"Alert aktif {st['alerts_active']} · /ask hari ini {st['ask_today']}",
+        f"Berita {st['news_total']} (belum dianalisis {st['news_pending']})",
+        f"OHLCV s/d {st['ohlcv_date']} · {st['tickers']} ticker",
+        "",
+        "<b>Job terakhir</b>",
+    ]
+    for j in jobs:
+        icon = "✅" if j["status"] == "ok" else "⏳" if j["status"] == "running" else "❌"
+        when = (j["started_at"] or "")[5:16].replace("T", " ")
+        lines.append(f"  {icon} {when} <code>{escape(j['job'])}</code> "
+                     f"{escape((j['detail'] or '')[:60])}")
+    return _clip("\n".join(lines))
+
+
 def _narrative_block(text: str | None) -> list[str]:
     return ["", f"💬 <i>{escape(text)}</i>"] if text else []
 
@@ -143,7 +179,8 @@ def premarket(r: PreMarketReport, cta: bool = False,
         "",
         "🇮🇩 <b>IHSG</b>",
         f"  Close kemarin {num(r.ihsg_close, 2)} {pct(r.ihsg_pct)}",
-        f"  Support {num(r.support, 0)} · Resistance {num(r.resistance, 0)}",
+        f"  Support {num(r.support, 0)} · Resistance {num(r.resistance, 0)} (20 hari)",
+        *([f"  S/R swing {escape(r.sr_swing)}"] if r.sr_swing else []),
         f"  RSI {num(r.ihsg_rsi, 1)} · {escape(r.ihsg_trend)}",
     ]
     if r.notes:
@@ -198,12 +235,13 @@ def weekly(r: WeeklyReport, cta: bool = False, narrative: str | None = None) -> 
 
 def ihsg_snapshot(date: str, close: float, pct_: float | None, volume: float,
                   ind: dict[str, float | None], support: float, resistance: float,
-                  trend: str) -> str:
+                  trend: str, sr: str | None = None) -> str:
     lines = [
         f"🇮🇩 <b>IHSG</b> — {date}",
         f"Close {num(close, 2)}  {pct(pct_)} · Vol {vol(volume)}",
         "",
         f"<b>Support</b> {num(support)} · <b>Resistance</b> {num(resistance)} (20 hari)",
+        *([f"<b>S/R swing</b> {escape(sr)}"] if sr else []),
         f"Tren: {escape(trend)}",
         "",
         "<b>Indikator</b>",
@@ -225,7 +263,8 @@ def alert_triggered(code: str, label: str, actual: float, metric: str, date: str
 
 def stock_snapshot(code: str, date: str, close: float, pct_: float | None, volume: float,
                    ind: dict[str, float | None], rating_: str | None, score: int | None,
-                   rules: list[str], headlines: list[Headline] | None = None) -> str:
+                   rules: list[str], headlines: list[Headline] | None = None,
+                   sr: str | None = None) -> str:
     lines = [
         f"📈 <b>{code}</b> — {date}",
         f"Close {num(close)}  {pct(pct_)} · Vol {vol(volume)}",
@@ -238,6 +277,8 @@ def stock_snapshot(code: str, date: str, close: float, pct_: float | None, volum
         f"  BB {num(ind.get('bb_lower'))} – {num(ind.get('bb_upper'))} · "
         f"ATR {num(ind.get('atr14'), 1)}",
     ]
+    if sr:
+        lines += [f"  <b>S/R swing</b> {escape(sr)}"]
     if rating_:
         lines += ["", f"<b>Rating</b> {RATING_EMOJI[rating_]} {rating_} ({score:+d})"]
     if rules:

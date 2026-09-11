@@ -6,13 +6,13 @@ import logging
 import re
 import sqlite3
 
-from sahamku import db, news
+from sahamku import db, levels, news
 from sahamku.analysis import premarket
 from sahamku.config import DISCLAIMER
 from sahamku.llm.providers import generate
 from sahamku.pipeline import load_joined
 from sahamku.signals.rules import RULE_LABELS
-from sahamku.universe import LQ45, to_yf
+from sahamku.universe import STOCKS, to_yf
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def detect_codes(text: str, max_codes: int = 3) -> list[str]:
     found: list[str] = []
     for m in _CODE_RE.finditer(text):
         c = (m.group(1) or m.group(2)).upper()
-        if c in LQ45 and c not in found:
+        if c in STOCKS and c not in found:
             found.append(c)
     return found[:max_codes]
 
@@ -77,6 +77,7 @@ def build_context(conn: sqlite3.Connection, codes: list[str]) -> str:
         sigs = [f"{RULE_LABELS.get(s['rule'], s['rule'])} ({s['detail']})"
                 for s in db.signals_for(conn, t, date_str)]
         chg = (last["close"] / j["close"].iloc[-2] - 1) * 100 if len(j) > 1 else 0
+        sr = levels.describe(levels.compute(db.load_ohlcv(conn, t)))
         parts.append(
             f"[{code}] data s/d {date_str}. Close {last['close']:.0f} ({chg:+.2f}%). "
             f"SMA20 {last['sma20']:.0f} SMA50 {last['sma50']:.0f} SMA200 {last['sma200']:.0f}. "
@@ -84,17 +85,24 @@ def build_context(conn: sqlite3.Connection, codes: list[str]) -> str:
             f"BB {last['bb_lower']:.0f}-{last['bb_upper']:.0f}. ATR {last['atr14']:.1f}. "
             f"Vol rata-rata 20D {last['vol_avg20'] / 1e6:.1f}jt. "
             f"Rating: {rating['rating'] if rating else 'n/a'}. "
-            f"Sinyal aktif: {'; '.join(sigs) if sigs else 'tidak ada'}.\n"
+            f"Sinyal aktif: {'; '.join(sigs) if sigs else 'tidak ada'}. "
+            f"Support/resistance swing: {sr}.\n"
             f"15 bar terakhir:\n{bars}"
         )
     return "\n\n".join(parts)
 
 
-async def ask(conn: sqlite3.Connection, question: str) -> str:
+async def ask(conn: sqlite3.Connection, question: str, chat_id: int | None = None) -> str:
     codes = detect_codes(question)
+    # pertanyaan lanjutan tanpa kode: pakai kode dari giliran sebelumnya
+    history = db.ask_history_recent(conn, chat_id) if chat_id else []
+    if not codes and history:
+        for _, t in reversed(history):
+            if codes := detect_codes(t):
+                break
     context = build_context(conn, codes)
     user_msg = f"Data terkini:\n{context}\n\nPertanyaan pengguna: {question}"
-    res = await generate(SYSTEM_PROMPT, user_msg)
+    res = await generate(SYSTEM_PROMPT, user_msg, history)
     if res.error:
         return res.error
     # model open-source kadang tetap memakai markdown; Telegram (HTML mode) menampilkannya mentah
@@ -103,4 +111,7 @@ async def ask(conn: sqlite3.Connection, question: str) -> str:
         return "Maaf, tidak ada jawaban yang bisa diberikan."
     if "bukan saran investasi" not in text.lower():
         text += f"\n\n{DISCLAIMER}"
+    if chat_id:
+        db.ask_history_add(conn, chat_id, "user", question)
+        db.ask_history_add(conn, chat_id, "assistant", text)
     return text

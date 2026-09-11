@@ -10,3 +10,4 @@ charts/
 *.egg-info/
 build/
 data/
+docs/eval/

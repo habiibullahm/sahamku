@@ -8,7 +8,7 @@ from datetime import date
 
 import pandas as pd
 
-from sahamku import db, news
+from sahamku import db, levels, news
 from sahamku.indicators.technical import compute
 from sahamku.universe import GLOBAL_TICKERS, IHSG, from_yf, to_yf
 
@@ -25,6 +25,7 @@ class PreMarketReport:
     ihsg_trend: str
     support: float | None
     resistance: float | None
+    sr_swing: str = ""
     notes: list[str] = field(default_factory=list)
     bullish_yesterday: list[str] = field(default_factory=list)
     bearish_yesterday: list[str] = field(default_factory=list)
@@ -104,6 +105,7 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
         ihsg_close=float(last["close"]), ihsg_pct=ihsg_pct,
         ihsg_rsi=None if pd.isna(last["rsi14"]) else float(last["rsi14"]),
         ihsg_trend=trend, support=support, resistance=resistance,
+        sr_swing=levels.describe(levels.compute(ihsg_df)),
         notes=notes, bullish_yesterday=bull[:10], bearish_yesterday=bear[:10], watchlist=watch,
         headlines=news.headlines(conn, hours=20, limit=6),
         news_sentiment=news.ticker_sentiment(conn, hours=20),
@@ -134,6 +136,11 @@ def _watch_info(conn: sqlite3.Connection, code: str, yday: str) -> str:
     sup = float(j["low"].tail(20).min())
     res = float(j["high"].tail(20).max())
     parts = [f"close {close:,.0f}"]
+    lv = levels.compute(df)
+    if lv.supports and (close - lv.supports[0]) / close <= 0.02:
+        parts.append(f"dekat S1 {lv.supports[0]:,.0f}")
+    if lv.resistances and (lv.resistances[0] - close) / close <= 0.02:
+        parts.append(f"dekat R1 {lv.resistances[0]:,.0f}")
     if res and (res - close) / close <= 0.02:
         parts.append(f"dekat resistance {res:,.0f}")
     if sup and (close - sup) / close <= 0.02:

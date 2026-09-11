@@ -13,7 +13,7 @@ import feedparser
 
 from sahamku import db
 from sahamku.config import TZ
-from sahamku.universe import LQ45, NAME_ALIASES
+from sahamku.universe import NAME_ALIASES, STOCKS
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def rule_tickers(text: str) -> list[str]:
     found: list[str] = []
     for m in _CODE.finditer(text):
         c = m.group(1)
-        if c in LQ45 and c not in found:
+        if c in STOCKS and c not in found:
             found.append(c)
     low = text.lower()
     for code, aliases in NAME_ALIASES.items():

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -96,6 +96,21 @@ CREATE TABLE IF NOT EXISTS news (
     analyzed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_news_published ON news(published);
+CREATE TABLE IF NOT EXISTS user_prefs (
+    chat_id INTEGER PRIMARY KEY,
+    premarket INTEGER NOT NULL DEFAULT 1,
+    aftermarket INTEGER NOT NULL DEFAULT 1,
+    weekly INTEGER NOT NULL DEFAULT 1,
+    alerts INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS ask_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ask_history ON ask_history(chat_id, id);
 CREATE TABLE IF NOT EXISTS job_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT NOT NULL,
@@ -455,6 +470,78 @@ def news_sentiment_by_ticker(conn: sqlite3.Connection, since_iso: str
                 neg += 1
             out[t] = (pos, neg)
     return out
+
+
+# ---------- preferensi user ----------
+
+PREF_KEYS = ("premarket", "aftermarket", "weekly", "alerts")
+
+
+def prefs_get(conn: sqlite3.Connection, chat_id: int) -> dict[str, bool]:
+    row = conn.execute("SELECT * FROM user_prefs WHERE chat_id=?", (chat_id,)).fetchone()
+    return {k: bool(row[k]) if row else True for k in PREF_KEYS}
+
+
+def prefs_toggle(conn: sqlite3.Connection, chat_id: int, key: str) -> bool:
+    assert key in PREF_KEYS
+    cur = prefs_get(conn, chat_id)
+    new = not cur[key]
+    conn.execute("INSERT OR IGNORE INTO user_prefs (chat_id) VALUES (?)", (chat_id,))
+    conn.execute(f"UPDATE user_prefs SET {key}=? WHERE chat_id=?", (1 if new else 0, chat_id))
+    return new
+
+
+def recipients(conn: sqlite3.Connection, key: str) -> list[int]:
+    """chat_id yang subscribed DAN mengaktifkan jenis laporan `key`."""
+    assert key in PREF_KEYS
+    return [r["chat_id"] for r in conn.execute(
+        f"SELECT u.chat_id FROM users u LEFT JOIN user_prefs p ON p.chat_id=u.chat_id "
+        f"WHERE u.subscribed=1 AND COALESCE(p.{key}, 1)=1")]
+
+
+# ---------- memori /ask ----------
+
+def ask_history_add(conn: sqlite3.Connection, chat_id: int, role: str, text: str) -> None:
+    conn.execute("INSERT INTO ask_history (chat_id, role, text, ts) VALUES (?,?,?,?)",
+                 (chat_id, role, text[:4000], _now()))
+
+
+def ask_history_recent(conn: sqlite3.Connection, chat_id: int, limit: int = 6,
+                       max_age_hours: int = 2) -> list[tuple[str, str]]:
+    cutoff = (datetime.now(TZ) - timedelta(hours=max_age_hours)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT role, text FROM ask_history WHERE chat_id=? AND ts>=? ORDER BY id DESC LIMIT ?",
+        (chat_id, cutoff, limit)).fetchall()
+    return [(r["role"], r["text"]) for r in reversed(rows)]
+
+
+def ask_history_clear(conn: sqlite3.Connection, chat_id: int) -> None:
+    conn.execute("DELETE FROM ask_history WHERE chat_id=?", (chat_id,))
+
+
+# ---------- admin stats ----------
+
+def admin_stats(conn: sqlite3.Connection) -> dict:
+    q = lambda sql, *a: conn.execute(sql, a).fetchone()[0]  # noqa: E731
+    today = _today()
+    return {
+        "users": q("SELECT COUNT(*) FROM users"),
+        "subscribed": q("SELECT COUNT(*) FROM users WHERE subscribed=1"),
+        "with_watchlist": q("SELECT COUNT(DISTINCT chat_id) FROM watchlist"),
+        "watch_rows": q("SELECT COUNT(*) FROM watchlist"),
+        "alerts_active": q("SELECT COUNT(*) FROM alerts WHERE triggered_at IS NULL"),
+        "ask_today": q("SELECT COALESCE(SUM(n),0) FROM ask_log WHERE day=?", today),
+        "news_total": q("SELECT COUNT(*) FROM news"),
+        "news_pending": q("SELECT COUNT(*) FROM news WHERE analyzed_at IS NULL"),
+        "ohlcv_date": q("SELECT MAX(date) FROM ohlcv"),
+        "tickers": q("SELECT COUNT(DISTINCT ticker) FROM ohlcv"),
+    }
+
+
+def job_runs_recent(conn: sqlite3.Connection, limit: int = 8) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT job, started_at, finished_at, status, detail FROM job_runs "
+        "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
 
 # ---------- job runs ----------

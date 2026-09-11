@@ -110,7 +110,7 @@ async def job_premarket(bot: Bot) -> None:
 
     async def run():
         with db.db() as conn:
-            ids = set(db.subscribed_chat_ids(conn))
+            ids = set(db.recipients(conn, "premarket"))
             if settings.admin_chat_id:
                 ids.add(settings.admin_chat_id)
             base = premarket.build(conn, for_date=_today())
@@ -181,7 +181,7 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
 async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> None:
     async def run():
         with db.db() as conn:
-            ids = set(db.subscribed_chat_ids(conn))
+            ids = set(db.recipients(conn, "aftermarket"))
             if settings.admin_chat_id:
                 ids.add(settings.admin_chat_id)
             base = aftermarket.build(conn, missing=missing)
@@ -211,7 +211,10 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
 
 async def _send_alerts(bot: Bot, conn) -> int:
     sent = 0
+    allowed = set(db.recipients(conn, "alerts"))
     for t in alerts.check_all(conn):
+        if t.chat_id not in allowed and t.chat_id != settings.admin_chat_id:
+            continue
         try:
             await bot.send_message(t.chat_id, fmt.alert_triggered(
                 t.spec.code, t.spec.label(), t.actual, t.spec.metric, t.date))
@@ -230,7 +233,7 @@ async def job_weekly_recap(bot: Bot) -> None:
             r = weekly.build(conn)
             if not r:
                 return "no data"
-            ids = set(db.subscribed_chat_ids(conn))
+            ids = set(db.recipients(conn, "weekly"))
             if settings.admin_chat_id:
                 ids.add(settings.admin_chat_id)
             narr = await narrative.get_or_create(conn, "weekly", r.week_end, fmt.weekly(r))

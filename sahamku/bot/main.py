@@ -14,6 +14,7 @@ from sahamku import db
 from sahamku.bot.handlers import router
 from sahamku.bot.scheduler import build_scheduler
 from sahamku.config import settings
+from sahamku.pipeline import ensure_history
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ COMMANDS = [
     BotCommand(command="alerts", description="Daftar alert aktif"),
     BotCommand(command="unalert", description="Hapus alert: /unalert ID"),
     BotCommand(command="ask", description="Tanya AI tentang saham"),
+    BotCommand(command="settings", description="Atur laporan yang diterima"),
     BotCommand(command="stop", description="Berhenti menerima laporan otomatis"),
     BotCommand(command="resume", description="Aktifkan lagi laporan otomatis"),
     BotCommand(command="help", description="Bantuan"),
@@ -49,6 +51,14 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(router)
     await bot.set_my_commands(COMMANDS)
+
+    # ticker baru (mis. universe diperluas) → backfill di background, tidak menahan polling
+    async def _ensure():
+        with db.db() as conn:
+            added = await asyncio.to_thread(ensure_history, conn)
+        if added:
+            log.info("histori ditambahkan untuk %d ticker", len(added))
+    asyncio.create_task(_ensure())
 
     scheduler = build_scheduler(bot)
     scheduler.start()

@@ -20,18 +20,20 @@ class NotConfigured(Exception):
     pass
 
 
-async def generate(system: str, user: str) -> LLMResult:
+async def generate(system: str, user: str,
+                   history: list[tuple[str, str]] | None = None) -> LLMResult:
+    """history: [(role, text)] giliran sebelumnya (role: user|assistant)."""
     provider = settings.llm_provider.lower()
     if provider == "groq":
-        return await _groq(system, user)
+        return await _groq(system, user, history or [])
     if provider == "anthropic":
-        return await _anthropic(system, user)
+        return await _anthropic(system, user, history or [])
     return LLMResult("", f"LLM_PROVIDER tidak dikenal: {provider}")
 
 
 # ---------- Groq ----------
 
-async def _groq(system: str, user: str) -> LLMResult:
+async def _groq(system: str, user: str, history: list[tuple[str, str]]) -> LLMResult:
     import groq
 
     if not settings.groq_api_key:
@@ -44,6 +46,7 @@ async def _groq(system: str, user: str) -> LLMResult:
             temperature=0.3,
             messages=[
                 {"role": "system", "content": system},
+                *({"role": r, "content": t} for r, t in history),
                 {"role": "user", "content": user},
             ],
         )
@@ -66,7 +69,7 @@ async def _groq(system: str, user: str) -> LLMResult:
 
 # ---------- Anthropic ----------
 
-async def _anthropic(system: str, user: str) -> LLMResult:
+async def _anthropic(system: str, user: str, history: list[tuple[str, str]]) -> LLMResult:
     import anthropic
 
     if not settings.anthropic_api_key:
@@ -78,7 +81,8 @@ async def _anthropic(system: str, user: str) -> LLMResult:
             max_tokens=settings.llm_max_tokens,
             thinking={"type": "adaptive"},
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": user}],
+            messages=[*({"role": r, "content": t} for r, t in history),
+                      {"role": "user", "content": user}],
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
         ) as stream:
