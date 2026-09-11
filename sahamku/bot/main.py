@@ -24,6 +24,7 @@ COMMANDS = [
     BotCommand(command="unwatch", description="Hapus dari watchlist"),
     BotCommand(command="watchlist", description="Lihat watchlist"),
     BotCommand(command="ihsg", description="Snapshot IHSG + chart + support/resistance"),
+    BotCommand(command="news", description="Berita pasar/emiten dengan sentimen"),
     BotCommand(command="alert", description="Alert level, contoh: /alert BBCA > 6500"),
     BotCommand(command="alerts", description="Daftar alert aktif"),
     BotCommand(command="unalert", description="Hapus alert: /unalert ID"),
@@ -42,7 +43,8 @@ async def main() -> None:
     db.init_db()
 
     bot = Bot(settings.telegram_bot_token,
-              default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+              default=DefaultBotProperties(parse_mode=ParseMode.HTML,
+                                           link_preview_is_disabled=True))
     dp = Dispatcher()
     dp.include_router(router)
     await bot.set_my_commands(COMMANDS)

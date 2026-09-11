@@ -8,6 +8,7 @@ from sahamku.analysis.aftermarket import AfterMarketReport, Mover, TickerSignals
 from sahamku.analysis.premarket import PreMarketReport
 from sahamku.analysis.weekly import WeeklyReport
 from sahamku.config import DISCLAIMER, settings
+from sahamku.news import SENT_EMOJI, Headline
 from sahamku.signals.scoring import RATING_EMOJI
 
 TELEGRAM_MAX = 4096
@@ -38,6 +39,19 @@ def vol(v: float | None) -> str:
     if v >= 1e6:
         return f"{v / 1e6:.1f}jt"
     return f"{v:,.0f}"
+
+
+def _headline_line(h: Headline) -> str:
+    tick = f" <code>{'/'.join(h.tickers)}</code>" if h.tickers else ""
+    return (f"  {SENT_EMOJI.get(h.sentiment, '⚪')}{tick} "
+            f"<a href=\"{escape(h.link, quote=True)}\">{escape(h.title)}</a> — {escape(h.source)}")
+
+
+def news_list(code: str | None, items: list[Headline], hours: int) -> str:
+    title = f"📰 <b>Berita {code}</b>" if code else "📰 <b>Berita pasar</b>"
+    if not items:
+        return f"{title}\nBelum ada berita {hours} jam terakhir."
+    return "\n".join([f"{title} ({hours} jam terakhir)", *(_headline_line(h) for h in items)])
 
 
 def _narrative_block(text: str | None) -> list[str]:
@@ -121,6 +135,12 @@ def premarket(r: PreMarketReport, cta: bool = False,
         parts += ["", "🟢 <b>Bullish dari scan kemarin</b>: " + ", ".join(r.bullish_yesterday)]
     if r.bearish_yesterday:
         parts += ["🔴 <b>Bearish dari scan kemarin</b>: " + ", ".join(r.bearish_yesterday)]
+    if r.headlines:
+        parts += ["", "📰 <b>Berita</b>", *(_headline_line(h) for h in r.headlines)]
+    if r.news_sentiment:
+        items = sorted(r.news_sentiment.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:8]
+        parts += ["  Sentimen emiten: " + " · ".join(
+            f"{c} 🟢{p}🔴{n}" for c, (p, n) in items)]
     if r.watchlist:
         parts += ["", "👀 <b>Watchlist</b>"]
         for code, info in r.watchlist.items():
@@ -188,7 +208,7 @@ def alert_triggered(code: str, label: str, actual: float, metric: str, date: str
 
 def stock_snapshot(code: str, date: str, close: float, pct_: float | None, volume: float,
                    ind: dict[str, float | None], rating_: str | None, score: int | None,
-                   rules: list[str]) -> str:
+                   rules: list[str], headlines: list[Headline] | None = None) -> str:
     lines = [
         f"📈 <b>{code}</b> — {date}",
         f"Close {num(close)}  {pct(pct_)} · Vol {vol(volume)}",
@@ -205,6 +225,8 @@ def stock_snapshot(code: str, date: str, close: float, pct_: float | None, volum
         lines += ["", f"<b>Rating</b> {RATING_EMOJI[rating_]} {rating_} ({score:+d})"]
     if rules:
         lines += ["<b>Sinyal aktif</b>", *(f"  • {escape(r)}" for r in rules)]
+    if headlines:
+        lines += ["", "📰 <b>Berita terkait</b>", *(_headline_line(h) for h in headlines)]
     lines += ["", f"<i>{DISCLAIMER}</i>"]
     return _clip("\n".join(lines))
 

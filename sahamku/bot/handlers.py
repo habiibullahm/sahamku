@@ -10,7 +10,7 @@ from aiogram import F, Router, types
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import FSInputFile
 
-from sahamku import alerts, db
+from sahamku import alerts, db, news
 from sahamku.analysis import aftermarket, premarket
 from sahamku.config import settings
 from sahamku.llm import narrative
@@ -34,6 +34,7 @@ HELP = """<b>Sahamku</b> — daily scan saham LQ45
 /unwatch KODE — hapus dari watchlist
 /watchlist — lihat watchlist
 /ihsg — snapshot IHSG + chart + support/resistance
+/news [KODE] — berita pasar / emiten dengan sentimen
 /alert KODE > HARGA — alert level (contoh: /alert BBCA > 6500, /alert BBRI rsi < 30)
 /alerts — daftar alert · /unalert ID — hapus alert
 /ask pertanyaan — tanya AI (contoh: /ask kenapa BBCA turun?)
@@ -113,9 +114,12 @@ async def cmd_stock(m: types.Message, command: CommandObject) -> None:
     ind = {k: (None if last[k] != last[k] else float(last[k]))
            for k in ("sma20", "sma50", "sma200", "rsi14", "macd", "macd_signal",
                      "bb_lower", "bb_upper", "atr14")}
+    with db.db() as conn:
+        heads = news.headlines(conn, hours=72, code=code, limit=3)
     text = fmt.stock_snapshot(
         code, date_str, float(last["close"]), pct, float(last["volume"]), ind,
         rating["rating"] if rating else None, rating["score"] if rating else None, rules,
+        headlines=heads,
     )
     async with _chart_lock:
         png = await asyncio.to_thread(chart.render, code, j)
@@ -145,6 +149,18 @@ async def cmd_ihsg(m: types.Message) -> None:
         png = await asyncio.to_thread(chart.render, "IHSG", j)
     await m.answer_photo(FSInputFile(png))
     await m.answer(text)
+
+
+@router.message(Command("news"))
+async def cmd_news(m: types.Message, command: CommandObject) -> None:
+    code = _code_arg(command)
+    if code and not is_known_code(code):
+        await m.answer(f"{code} tidak ada di universe LQ45.")
+        return
+    hours = 72 if code else 24
+    with db.db() as conn:
+        items = news.headlines(conn, hours=hours, code=code, limit=10)
+    await m.answer(fmt.news_list(code, items, hours))
 
 
 @router.message(Command("alert"))

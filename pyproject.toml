@@ -12,6 +12,7 @@ dependencies = [
     "mplfinance>=0.12.10b0",
     "anthropic>=1.0",
     "groq>=0.30",
+    "feedparser>=6.0",
     "pydantic-settings>=2.5",
     "python-dotenv>=1.0",
 ]

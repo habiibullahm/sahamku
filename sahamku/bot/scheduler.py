@@ -18,6 +18,8 @@ from sahamku.config import TZ, settings
 from sahamku.ingestion.eod import ingest, validate_eod
 from sahamku.ingestion.global_ import ingest_global
 from sahamku.llm import narrative
+from sahamku.news import ingest as news_ingest
+from sahamku.news import sentiment as news_sentiment
 from sahamku.pipeline import recompute_all
 from sahamku.report import format as fmt
 from sahamku.universe import is_trading_day
@@ -87,6 +89,19 @@ async def job_ingest_global(bot: Bot) -> None:
         return f"{len(c)} tickers"
 
     await _run_logged("ingest_global", run, bot)
+
+
+async def job_news(bot: Bot) -> None:
+    if not is_trading_day(_today()):
+        return
+
+    async def run():
+        with db.db() as conn:
+            n = await asyncio.to_thread(news_ingest.ingest, conn)
+            a = await news_sentiment.analyze_pending(conn, limit=90)
+        return f"{n} baru, {a} dianalisis"
+
+    await _run_logged("news", run, bot)
 
 
 async def job_premarket(bot: Bot) -> None:
@@ -261,6 +276,10 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
 
     sch.add_job(job_ingest_global, CronTrigger(day_of_week="mon-fri", hour=7, minute=30),
                 args=[bot], id="ingest_global")
+    sch.add_job(job_news, CronTrigger(day_of_week="mon-fri", hour=7, minute=45),
+                args=[bot], id="news_am")
+    sch.add_job(job_news, CronTrigger(day_of_week="mon-fri", hour=16, minute=10),
+                args=[bot], id="news_pm")
     sch.add_job(job_premarket, CronTrigger(day_of_week="mon-fri", hour=ph, minute=pm),
                 args=[bot], id="premarket")
     sch.add_job(job_eod_pipeline, CronTrigger(day_of_week="mon-fri", hour=eod_h, minute=eod_m),

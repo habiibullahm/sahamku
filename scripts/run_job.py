@@ -1,6 +1,6 @@
 """Jalankan satu job secara manual (tanpa Telegram, output ke stdout).
 
-Usage: python scripts/run_job.py eod|global|compute|premarket|aftermarket|weekly|chart [KODE]
+Usage: python scripts/run_job.py eod|global|compute|news|premarket|aftermarket|weekly|chart [KODE]
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ from sahamku import db  # noqa: E402
 from sahamku.analysis import aftermarket, premarket, weekly  # noqa: E402
 from sahamku.ingestion.eod import ingest, validate_eod  # noqa: E402
 from sahamku.ingestion.global_ import ingest_global  # noqa: E402
+from sahamku.news import ingest as news_ingest  # noqa: E402
+from sahamku.news import sentiment as news_sentiment  # noqa: E402
 from sahamku.pipeline import load_joined, recompute_all  # noqa: E402
 from sahamku.report import chart  # noqa: E402
 from sahamku.report import format as fmt  # noqa: E402
@@ -46,6 +48,11 @@ def main() -> None:
             case "premarket":
                 r = premarket.build(conn, watch_codes=["BBCA", "TLKM"])
                 print(_strip(fmt.premarket(r)) if r else "no data")
+            case "news":
+                import asyncio
+                n = news_ingest.ingest(conn)
+                a = asyncio.run(news_sentiment.analyze_pending(conn, limit=90))
+                print(f"{n} baru, {a} dianalisis")
             case "weekly":
                 r = weekly.build(conn)
                 print(_strip(fmt.weekly(r)) if r else "no data")

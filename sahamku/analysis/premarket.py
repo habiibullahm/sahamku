@@ -8,7 +8,7 @@ from datetime import date
 
 import pandas as pd
 
-from sahamku import db
+from sahamku import db, news
 from sahamku.indicators.technical import compute
 from sahamku.universe import GLOBAL_TICKERS, IHSG, from_yf, to_yf
 
@@ -29,6 +29,8 @@ class PreMarketReport:
     bullish_yesterday: list[str] = field(default_factory=list)
     bearish_yesterday: list[str] = field(default_factory=list)
     watchlist: dict[str, str] = field(default_factory=dict)
+    headlines: list[news.Headline] = field(default_factory=list)
+    news_sentiment: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
 # Kontribusi ke sentimen IHSG: +1 jika naik searah, -1 jika berlawanan (USD/IDR & yield inverse)
@@ -103,6 +105,8 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
         ihsg_rsi=None if pd.isna(last["rsi14"]) else float(last["rsi14"]),
         ihsg_trend=trend, support=support, resistance=resistance,
         notes=notes, bullish_yesterday=bull[:10], bearish_yesterday=bear[:10], watchlist=watch,
+        headlines=news.headlines(conn, hours=20, limit=6),
+        news_sentiment=news.ticker_sentiment(conn, hours=20),
     )
 
 

@@ -6,7 +6,7 @@ import logging
 import re
 import sqlite3
 
-from sahamku import db
+from sahamku import db, news
 from sahamku.analysis import premarket
 from sahamku.config import DISCLAIMER
 from sahamku.llm.providers import generate
@@ -52,8 +52,16 @@ def build_context(conn: sqlite3.Connection, codes: list[str]) -> str:
             f"resistance {pm.resistance:,.0f}. Sentimen global: {pm.sentiment_label}. "
             f"Global: {glob}"
         )
+    market_news = news.headlines(conn, hours=24, limit=5)
+    if market_news:
+        parts.append("[Berita pasar 24 jam] " + " | ".join(
+            f"{news.SENT_EMOJI.get(h.sentiment, '')}{h.title}" for h in market_news))
     for code in codes:
         t = to_yf(code)
+        heads = news.headlines(conn, hours=72, code=code, limit=4)
+        if heads:
+            parts.append(f"[Berita {code} 72 jam] " + " | ".join(
+                f"{news.SENT_EMOJI.get(h.sentiment, '')}{h.title}" for h in heads))
         j = load_joined(conn, t, limit=30)
         if j.empty:
             parts.append(f"[{code}] tidak ada data")

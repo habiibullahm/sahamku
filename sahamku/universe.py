@@ -16,6 +16,28 @@ LQ45 = [
 ]
 
 
+# Alias nama perusahaan (lowercase-insensitive) untuk deteksi berita
+NAME_ALIASES: dict[str, list[str]] = {
+    "ACES": ["Ace Hardware", "Aspirasi Hidup"], "ADRO": ["Adaro", "Alamtri"],
+    "AKRA": ["AKR Corporindo"], "AMMN": ["Amman Mineral"], "AMRT": ["Alfamart", "Sumber Alfaria"],
+    "ANTM": ["Antam", "Aneka Tambang"], "ARTO": ["Bank Jago"], "ASII": ["Astra International"],
+    "BBCA": ["BCA", "Bank Central Asia"], "BBNI": ["BNI", "Bank Negara Indonesia"],
+    "BBRI": ["BRI", "Bank Rakyat Indonesia"], "BBTN": ["BTN", "Bank Tabungan Negara"],
+    "BMRI": ["Bank Mandiri"], "BRIS": ["BSI", "Bank Syariah Indonesia"],
+    "BRPT": ["Barito Pacific"], "BUKA": ["Bukalapak"], "CPIN": ["Charoen Pokphand"],
+    "CTRA": ["Ciputra"], "ESSA": ["Essa Industries", "Surya Esa"], "EXCL": ["XL Axiata", "XLSmart"],
+    "GOTO": ["GoTo", "Gojek", "Tokopedia"], "ICBP": ["Indofood CBP"], "INCO": ["Vale Indonesia"],
+    "INDF": ["Indofood Sukses"], "INKP": ["Indah Kiat"], "ISAT": ["Indosat"],
+    "ITMG": ["Indo Tambangraya"], "JSMR": ["Jasa Marga"], "KLBF": ["Kalbe Farma"],
+    "MAPI": ["Mitra Adiperkasa"], "MAPA": ["MAP Aktif"], "MBMA": ["Merdeka Battery"],
+    "MDKA": ["Merdeka Copper"], "MEDC": ["Medco Energi"], "MTEL": ["Mitratel", "Dayamitra"],
+    "PGAS": ["PGN", "Perusahaan Gas Negara"], "PGEO": ["Pertamina Geothermal"],
+    "PTBA": ["Bukit Asam"], "SIDO": ["Sido Muncul"], "SMGR": ["Semen Indonesia"],
+    "SMRA": ["Summarecon"], "TLKM": ["Telkom Indonesia", "Telkom"], "TOWR": ["Sarana Menara"],
+    "UNTR": ["United Tractors"], "UNVR": ["Unilever Indonesia"],
+}
+
+
 def to_yf(code: str) -> str:
     """BBCA -> BBCA.JK ; indeks (^...) dibiarkan."""
     return code if code.startswith("^") else f"{code.upper()}.JK"

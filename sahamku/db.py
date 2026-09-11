@@ -82,6 +82,20 @@ CREATE TABLE IF NOT EXISTS narratives (
     created_at TEXT NOT NULL,
     PRIMARY KEY (kind, date)
 );
+CREATE TABLE IF NOT EXISTS news (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    link TEXT NOT NULL,
+    published TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    tickers TEXT NOT NULL DEFAULT '',
+    sentiment INTEGER,
+    market INTEGER,
+    analyzed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news(published);
 CREATE TABLE IF NOT EXISTS job_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT NOT NULL,
@@ -381,6 +395,66 @@ def narrative_set(conn: sqlite3.Connection, kind: str, date_str: str, text: str)
     conn.execute(
         "INSERT OR REPLACE INTO narratives (kind, date, text, created_at) VALUES (?,?,?,?)",
         (kind, date_str, text, _now()))
+
+
+# ---------- news ----------
+
+def news_insert(conn: sqlite3.Connection, it: dict, tickers: str) -> bool:
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO news (id, source, title, summary, link, published, fetched_at, "
+        "tickers) VALUES (?,?,?,?,?,?,?,?)",
+        (it["id"], it["source"], it["title"], it["summary"], it["link"], it["published"],
+         _now(), tickers))
+    return cur.rowcount > 0
+
+
+def news_pending(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, source, title, summary, tickers FROM news WHERE analyzed_at IS NULL "
+        "ORDER BY published DESC LIMIT ?", (limit,)).fetchall()
+
+
+def news_set_analysis(conn: sqlite3.Connection, news_id: str, tickers: str, sentiment: int,
+                      market: bool) -> None:
+    conn.execute(
+        "UPDATE news SET tickers=?, sentiment=?, market=?, analyzed_at=? WHERE id=?",
+        (tickers, sentiment, 1 if market else 0, _now(), news_id))
+
+
+def news_recent(conn: sqlite3.Connection, since_iso: str, code: str | None = None,
+                limit: int = 20, market_only: bool = True) -> list[sqlite3.Row]:
+    """Berita teranalisis sejak `since_iso`; jika `code`, hanya yang menyebut ticker itu."""
+    q = ("SELECT source, title, link, published, tickers, sentiment FROM news "
+         "WHERE analyzed_at IS NOT NULL AND published >= ?")
+    args: list = [since_iso]
+    if code:
+        q += " AND (',' || tickers || ',') LIKE ?"
+        args.append(f"%,{code.upper()},%")
+    elif market_only:
+        q += " AND market=1"
+    q += " ORDER BY (tickers != '') DESC, published DESC LIMIT ?"
+    args.append(limit)
+    return conn.execute(q, args).fetchall()
+
+
+def news_sentiment_by_ticker(conn: sqlite3.Connection, since_iso: str
+                             ) -> dict[str, tuple[int, int]]:
+    """{code: (jumlah positif, jumlah negatif)} untuk berita sejak since_iso."""
+    out: dict[str, tuple[int, int]] = {}
+    rows = conn.execute(
+        "SELECT tickers, sentiment FROM news WHERE analyzed_at IS NOT NULL AND published >= ? "
+        "AND tickers != ''", (since_iso,)).fetchall()
+    for r in rows:
+        for t in r["tickers"].split(","):
+            if not t:
+                continue
+            pos, neg = out.get(t, (0, 0))
+            if r["sentiment"] == 1:
+                pos += 1
+            elif r["sentiment"] == -1:
+                neg += 1
+            out[t] = (pos, neg)
+    return out
 
 
 # ---------- job runs ----------
