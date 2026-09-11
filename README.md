@@ -18,6 +18,9 @@ python -m sahamku.bot.main      # jalankan bot (long polling + scheduler)
 
 `ADMIN_CHAT_ID` = chat_id Telegram Anda (kirim `/start` ke bot, lihat log, atau pakai @userinfobot).
 
+`CHANNEL_ID` (opsional) = channel publik, mis. `@sahamku_id`. Laporan pre/after-market ikut diposting
+ke channel (tanpa watchlist). Bot harus dijadikan **admin channel** dengan izin *Post messages*.
+
 ## Jalankan 24 jam dengan Docker
 
 ```bash

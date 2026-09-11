@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     anthropic_api_key: str = ""
     admin_chat_id: int | None = None
+    # Channel publik untuk broadcast laporan (mis. "@sahamku_id"); bot harus admin channel
+    channel_id: str | None = None
     db_path: Path = PROJECT_ROOT / "sahamku.db"
     charts_dir: Path = PROJECT_ROOT / "charts"
 
@@ -52,7 +54,7 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     groq_max_tokens: int = 2048
 
-    @field_validator("admin_chat_id", "schedule_override_premarket",
+    @field_validator("admin_chat_id", "channel_id", "schedule_override_premarket",
                      "schedule_override_aftermarket", mode="before")
     @classmethod
     def _empty_to_none(cls, v):

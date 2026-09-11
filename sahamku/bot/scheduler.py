@@ -54,6 +54,18 @@ async def _run_logged(job: str, fn) -> str:
         return "error"
 
 
+async def _post_channel(bot: Bot, text: str) -> bool:
+    """Broadcast ke channel publik (tanpa watchlist). Gagal tidak menghentikan job."""
+    if not settings.channel_id:
+        return False
+    try:
+        await bot.send_message(settings.channel_id, text)
+        return True
+    except Exception:
+        log.warning("gagal post ke channel %s", settings.channel_id, exc_info=True)
+        return False
+
+
 # ---------- jobs ----------
 
 async def job_ingest_global(bot: Bot) -> None:
@@ -89,7 +101,9 @@ async def job_premarket(bot: Bot) -> None:
                     await asyncio.sleep(0.05)
                 except Exception:
                     log.warning("gagal kirim premarket ke %s", cid, exc_info=True)
-        return f"sent to {sent} chats"
+            r = premarket.build(conn, for_date=_today())
+        ch = await _post_channel(bot, fmt.premarket(r)) if r else False
+        return f"sent to {sent} chats; channel={ch}"
 
     await _run_logged("premarket", run)
 
@@ -149,7 +163,9 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
                     await asyncio.sleep(0.05)
                 except Exception:
                     log.warning("gagal kirim aftermarket ke %s", cid, exc_info=True)
-        return f"sent to {sent} chats"
+            r = aftermarket.build(conn, missing=missing)
+        ch = await _post_channel(bot, fmt.aftermarket(r)) if r else False
+        return f"sent to {sent} chats; channel={ch}"
 
     await _run_logged("send_aftermarket", run)
 
