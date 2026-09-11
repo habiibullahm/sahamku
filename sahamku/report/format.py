@@ -5,7 +5,10 @@ from __future__ import annotations
 from html import escape
 
 from sahamku.analysis.aftermarket import AfterMarketReport, Mover, TickerSignals
+from sahamku.analysis.compare import Row as CompareRow
+from sahamku.analysis.midday import MiddayReport
 from sahamku.analysis.premarket import PreMarketReport
+from sahamku.analysis.sector import SectorRow
 from sahamku.analysis.weekly import WeeklyReport
 from sahamku.config import DISCLAIMER, settings
 from sahamku.news import SENT_EMOJI, Headline
@@ -72,9 +75,63 @@ def screener_result(date: str, q: Query, rows) -> str:
 
 
 PREF_LABELS = {
-    "premarket": "🌅 Pre-market 08:15", "aftermarket": "📊 After-market 17:00",
-    "weekly": "🗓 Rekap mingguan", "alerts": "🔔 Alert level",
+    "premarket": "🌅 Pre-market 08:15", "midday": "🕛 Tengah hari 12:15",
+    "aftermarket": "📊 After-market 17:00", "weekly": "🗓 Rekap mingguan",
+    "alerts": "🔔 Alert level",
 }
+
+
+def midday(r: MiddayReport, cta: bool = False) -> str:
+    parts = [
+        f"🕛 <b>Sahamku — Tengah Hari {r.date}</b> <i>(data delayed, {r.ts} WIB)</i>",
+        "",
+        f"<b>IHSG</b> {num(r.ihsg_last, 2)}  {pct(r.ihsg_pct)} · "
+        f"range {num(r.ihsg_low, 0)}–{num(r.ihsg_high, 0)}",
+        f"▲{r.advancers} ▼{r.decliners}",
+        "",
+        "🚀 <b>Top Gainers Sesi 1</b>",
+        *(_mover_line(m) for m in r.gainers),
+        "",
+        "📉 <b>Top Losers Sesi 1</b>",
+        *(_mover_line(m) for m in r.losers),
+    ]
+    if r.watchlist:
+        parts += ["", "👀 <b>Watchlist</b>"]
+        for code, m in r.watchlist.items():
+            parts.append(f"  <code>{code}</code> {num(m.close)} {pct(m.pct)}" if m
+                         else f"  <code>{code}</code> — belum ada data")
+    if cta:
+        parts += ["", cta_line()]
+    parts += ["", f"<i>{DISCLAIMER}</i>"]
+    return _clip("\n".join(parts))
+
+
+def compare(rows: list[CompareRow]) -> str:
+    def yn(v: bool | None) -> str:
+        return "—" if v is None else ("✅" if v else "❌")
+
+    lines = ["⚖️ <b>Perbandingan</b>", ""]
+    for r in rows:
+        rets = " · ".join(f"{k} {pct(v)}" for k, v in r.ret.items())
+        lines += [
+            f"{RATING_EMOJI[r.rating]} <b>{r.code}</b> {num(r.close)} ({r.score:+d})",
+            f"  {rets}",
+            f"  RSI {num(r.rsi, 0)} · >SMA50 {yn(r.above_sma50)} · >SMA200 {yn(r.above_sma200)}",
+        ]
+    lines += ["", f"<i>{DISCLAIMER}</i>"]
+    return _clip("\n".join(lines))
+
+
+def sector(date: str, rows: list[SectorRow]) -> str:
+    lines = [f"🏭 <b>Sektor</b> — {date}", ""]
+    for s in rows:
+        best = f"{s.best[0]} {s.best[1]:+.1f}%" if s.best else "—"
+        worst = f"{s.worst[0]} {s.worst[1]:+.1f}%" if s.worst else "—"
+        lines.append(f"<b>{escape(s.name)}</b> {pct(s.avg_chg)} · {s.n} saham · "
+                     f"🟢{s.bullish} 🔴{s.bearish}")
+        lines.append(f"  ↑ {best} · ↓ {worst}")
+    lines += ["", "Detail: /screener atau /stock KODE", f"<i>{DISCLAIMER}</i>"]
+    return _clip("\n".join(lines))
 
 
 def settings_text(prefs: dict[str, bool], subscribed: bool) -> str:

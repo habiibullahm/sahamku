@@ -13,10 +13,12 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
 from sahamku import alerts, db, screener
-from sahamku.analysis import aftermarket, premarket, weekly
+from sahamku.analysis import aftermarket, midday, premarket, weekly
 from sahamku.config import TZ, settings
 from sahamku.ingestion.eod import ingest, validate_eod
 from sahamku.ingestion.global_ import ingest_global
+from sahamku.ingestion.intraday import in_session
+from sahamku.ingestion.intraday import snapshot as intraday_snapshot
 from sahamku.llm import narrative
 from sahamku.news import ingest as news_ingest
 from sahamku.news import sentiment as news_sentiment
@@ -102,6 +104,48 @@ async def job_news(bot: Bot) -> None:
         return f"{n} baru, {a} dianalisis"
 
     await _run_logged("news", run, bot)
+
+
+async def job_intraday(bot: Bot) -> None:
+    """Tiap N menit selama jam bursa: snapshot delayed + cek alert intraday."""
+    if not is_trading_day(_today()) or not in_session():
+        return
+
+    async def run():
+        with db.db() as conn:
+            n = await asyncio.to_thread(intraday_snapshot, conn)
+            sent = await _send_alerts(bot, conn, intraday=True)
+        return f"{n} ticker, {sent} alert"
+
+    await _run_logged("intraday", run, bot)
+
+
+async def job_midday(bot: Bot) -> None:
+    if not is_trading_day(_today()):
+        return
+
+    async def run():
+        with db.db() as conn:
+            await asyncio.to_thread(intraday_snapshot, conn)
+            ids = set(db.recipients(conn, "midday"))
+            sent = 0
+            for cid in ids:
+                r = midday.build(conn, watch_codes=db.watch_list(conn, cid))
+                if not r:
+                    return "no intraday data"
+                try:
+                    await bot.send_message(cid, fmt.midday(r))
+                    sent += 1
+                    await asyncio.sleep(0.05)
+                except TelegramForbiddenError:
+                    db.set_subscribed(conn, cid, False)
+                except Exception:
+                    log.warning("gagal kirim midday ke %s", cid, exc_info=True)
+            r = midday.build(conn)
+        ch = await _post_channel(bot, fmt.midday(r, cta=True)) if r else False
+        return f"sent to {sent} chats; channel={ch}"
+
+    await _run_logged("midday", run, bot)
 
 
 async def job_premarket(bot: Bot) -> None:
@@ -209,10 +253,10 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
     await _run_logged("send_aftermarket", run, bot)
 
 
-async def _send_alerts(bot: Bot, conn) -> int:
+async def _send_alerts(bot: Bot, conn, intraday: bool = False) -> int:
     sent = 0
     allowed = set(db.recipients(conn, "alerts"))
-    for t in alerts.check_all(conn):
+    for t in alerts.check_all(conn, intraday=intraday):
         if t.chat_id not in allowed and t.chat_id != settings.admin_chat_id:
             continue
         try:
@@ -286,6 +330,14 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
                 args=[bot], id="news_pm")
     sch.add_job(job_premarket, CronTrigger(day_of_week="mon-fri", hour=ph, minute=pm),
                 args=[bot], id="premarket")
+    sch.add_job(job_intraday, CronTrigger(day_of_week="mon-fri", hour="9-15",
+                                          minute=f"*/{settings.intraday_interval_min}"),
+                args=[bot], id="intraday")
+    # Sesi 1 tutup 12:00 (Sen–Kam) / 11:30 (Jumat)
+    sch.add_job(job_midday, CronTrigger(day_of_week="mon-thu", hour=12, minute=15),
+                args=[bot], id="midday")
+    sch.add_job(job_midday, CronTrigger(day_of_week="fri", hour=11, minute=45),
+                args=[bot], id="midday_fri")
     sch.add_job(job_eod_pipeline, CronTrigger(day_of_week="mon-fri", hour=eod_h, minute=eod_m),
                 args=[bot, sch], id="eod_pipeline")
     sch.add_job(job_weekly_recap, CronTrigger(day_of_week="sat", hour=9, minute=0),

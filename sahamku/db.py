@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS users (
     chat_id INTEGER PRIMARY KEY,
     username TEXT,
     joined_at TEXT NOT NULL,
-    subscribed INTEGER NOT NULL DEFAULT 1
+    subscribed INTEGER NOT NULL DEFAULT 1,
+    plan TEXT NOT NULL DEFAULT 'free'
 );
 CREATE TABLE IF NOT EXISTS ask_log (
     chat_id INTEGER NOT NULL,
@@ -101,7 +102,8 @@ CREATE TABLE IF NOT EXISTS user_prefs (
     premarket INTEGER NOT NULL DEFAULT 1,
     aftermarket INTEGER NOT NULL DEFAULT 1,
     weekly INTEGER NOT NULL DEFAULT 1,
-    alerts INTEGER NOT NULL DEFAULT 1
+    alerts INTEGER NOT NULL DEFAULT 1,
+    midday INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS ask_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,6 +113,12 @@ CREATE TABLE IF NOT EXISTS ask_history (
     ts TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ask_history ON ask_history(chat_id, id);
+CREATE TABLE IF NOT EXISTS intraday (
+    ticker TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    open REAL, high REAL, low REAL, last REAL, volume REAL, prev_close REAL
+);
 CREATE TABLE IF NOT EXISTS job_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job TEXT NOT NULL,
@@ -138,9 +146,23 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Tambah kolom baru pada tabel lama (CREATE TABLE IF NOT EXISTS tidak mengubah tabel ada)."""
+    wanted = {
+        "users": {"plan": "TEXT NOT NULL DEFAULT 'free'"},
+        "user_prefs": {"midday": "INTEGER NOT NULL DEFAULT 1"},
+    }
+    for table, cols in wanted.items():
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col, ddl in cols.items():
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
 @contextmanager
@@ -474,7 +496,7 @@ def news_sentiment_by_ticker(conn: sqlite3.Connection, since_iso: str
 
 # ---------- preferensi user ----------
 
-PREF_KEYS = ("premarket", "aftermarket", "weekly", "alerts")
+PREF_KEYS = ("premarket", "aftermarket", "midday", "weekly", "alerts")
 
 
 def prefs_get(conn: sqlite3.Connection, chat_id: int) -> dict[str, bool]:
@@ -542,6 +564,41 @@ def job_runs_recent(conn: sqlite3.Connection, limit: int = 8) -> list[sqlite3.Ro
     return conn.execute(
         "SELECT job, started_at, finished_at, status, detail FROM job_runs "
         "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+# ---------- intraday ----------
+
+def intraday_upsert(conn: sqlite3.Connection, ticker: str, date_str: str, ts: str, o: float,
+                    h: float, lo: float, last: float, vol: float, prev: float | None) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO intraday (ticker, date, ts, open, high, low, last, volume, "
+        "prev_close) VALUES (?,?,?,?,?,?,?,?,?)", (ticker, date_str, ts, o, h, lo, last, vol, prev))
+
+
+def intraday_all(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    today = _today()
+    return conn.execute("SELECT * FROM intraday WHERE date=? ORDER BY ts DESC", (today,)).fetchall()
+
+
+def intraday_get(conn: sqlite3.Connection, ticker: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM intraday WHERE ticker=? AND date=?", (ticker, _today())).fetchone()
+
+
+# ---------- plan (free/pro) ----------
+
+def plan_get(conn: sqlite3.Connection, chat_id: int) -> str:
+    row = conn.execute("SELECT plan FROM users WHERE chat_id=?", (chat_id,)).fetchone()
+    return row["plan"] if row else "free"
+
+
+def plan_set(conn: sqlite3.Connection, chat_id: int, plan: str) -> bool:
+    cur = conn.execute("UPDATE users SET plan=? WHERE chat_id=?", (plan, chat_id))
+    return cur.rowcount > 0
+
+
+def watch_count(conn: sqlite3.Connection, chat_id: int) -> int:
+    return conn.execute("SELECT COUNT(*) FROM watchlist WHERE chat_id=?", (chat_id,)).fetchone()[0]
 
 
 # ---------- job runs ----------

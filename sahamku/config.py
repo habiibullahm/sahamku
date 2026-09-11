@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     universe: str = "lq45"
     # Kuota /ask per chat per hari (admin bebas kuota)
     ask_daily_limit: int = 10
+    # Batas tier Free vs Pro (Pro diberikan admin: /admin pro <chat_id>)
+    free_watchlist_max: int = 5
+    free_alerts_max: int = 3
+    pro_ask_daily_limit: int = 50
+    pro_watchlist_max: int = 30
+    pro_alerts_max: int = 20
+    # Snapshot intraday (delayed) tiap N menit selama jam bursa
+    intraday_interval_min: int = 15
     # Narasi AI 2-3 kalimat di laporan (dibuat sekali per hari per jenis laporan)
     narrative_enabled: bool = True
     db_path: Path = PROJECT_ROOT / "sahamku.db"

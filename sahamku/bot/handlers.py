@@ -11,7 +11,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
 from sahamku import alerts, db, levels, news, screener
-from sahamku.analysis import aftermarket, premarket
+from sahamku.analysis import aftermarket, compare, premarket, sector
 from sahamku.config import settings
 from sahamku.llm import narrative
 from sahamku.llm.ask import ask as llm_ask
@@ -36,6 +36,8 @@ HELP = """<b>Sahamku</b> — daily scan saham IHSG
 /ihsg — snapshot IHSG + chart + support/resistance
 /news [KODE] — berita pasar / emiten dengan sentimen
 /screener FILTER — filter saham (contoh: /screener rsi&lt;35 above200)
+/compare A B C — bandingkan 2–4 saham + chart
+/sector — ringkasan per sektor
 /alert KODE > HARGA — alert level (contoh: /alert BBCA > 6500, /alert BBRI rsi < 30)
 /alerts — daftar alert · /unalert ID — hapus alert
 /ask pertanyaan — tanya AI (contoh: /ask kenapa BBCA turun?)
@@ -216,6 +218,10 @@ async def cmd_admin(m: types.Message, command: CommandObject) -> None:
     args = (command.args or "").strip()
     sub, _, rest = args.partition(" ")
     with db.db() as conn:
+        if sub in ("pro", "free") and rest.strip().lstrip("-").isdigit():
+            ok = db.plan_set(conn, int(rest.strip()), sub)
+            await m.answer(f"Plan {rest.strip()} → {sub}" if ok else "chat_id tidak ditemukan.")
+            return
         if sub == "broadcast" and rest.strip():
             ids = db.subscribed_chat_ids(conn)
             sent = 0
@@ -230,7 +236,8 @@ async def cmd_admin(m: types.Message, command: CommandObject) -> None:
             return
         st, jobs = db.admin_stats(conn), db.job_runs_recent(conn)
     await m.answer(fmt.admin_stats_text(st, jobs) +
-                   "\n\nPerintah: /admin · /admin broadcast &lt;pesan&gt;")
+                   "\n\nPerintah: /admin · /admin broadcast &lt;pesan&gt; · "
+                   "/admin pro|free &lt;chat_id&gt;")
 
 
 @router.message(Command("ihsg"))
@@ -293,13 +300,16 @@ async def cmd_alert(m: types.Message, command: CommandObject) -> None:
         return
     with db.db() as conn:
         db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
-        if db.alert_count(conn, m.chat.id) >= alerts.MAX_ALERTS_PER_CHAT:
-            await m.answer(f"Maksimal {alerts.MAX_ALERTS_PER_CHAT} alert aktif. "
+        lim = _limits(conn, m.chat.id)
+        if db.alert_count(conn, m.chat.id) >= lim["alerts"]:
+            tier = "" if lim["pro"] else " di tier Free"
+            await m.answer(f"Maksimal {lim['alerts']} alert aktif{tier}. "
                            "Hapus dulu dengan /unalert ID.")
             return
         aid = db.alert_add(conn, m.chat.id, spec.code, spec.metric, spec.op, spec.value)
     await m.answer(f"🔔 Alert #{aid} dibuat: <b>{escape(spec.label())}</b>\n"
-                   "Dicek setiap hari bursa setelah penutupan (±16:45 WIB), sekali kirim.")
+                   "Dicek tiap 15 menit selama jam bursa (harga delayed) dan setelah penutupan; "
+                   "sekali kirim.")
 
 
 @router.message(Command("alerts"))
@@ -336,6 +346,13 @@ async def cmd_watch(m: types.Message, command: CommandObject) -> None:
         return
     with db.db() as conn:
         db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
+        lim = _limits(conn, m.chat.id)
+        if code not in db.watch_list(conn, m.chat.id) and \
+                db.watch_count(conn, m.chat.id) >= lim["watch"]:
+            tier = "" if lim["pro"] else " di tier Free"
+            await m.answer(f"Watchlist maksimal {lim['watch']} saham{tier}. "
+                           "Hapus dulu dengan /unwatch.")
+            return
         added = db.watch_add(conn, m.chat.id, code)
     await m.answer(f"✅ {code} ditambahkan." if added else f"{code} sudah ada di watchlist.")
 
@@ -380,14 +397,15 @@ async def cmd_ask(m: types.Message, command: CommandObject) -> None:
 async def _run_ask(m: types.Message, chat_id: int, q: str) -> None:
     is_admin = settings.admin_chat_id == chat_id
     with db.db() as conn:
+        limit = _limits(conn, chat_id)["ask"]
         used = db.ask_count_today(conn, chat_id)
-        if not is_admin and used >= settings.ask_daily_limit:
-            await m.answer(f"⏳ Kuota /ask hari ini habis ({settings.ask_daily_limit}/hari). "
+        if not is_admin and used >= limit:
+            await m.answer(f"⏳ Kuota /ask hari ini habis ({limit}/hari). "
                            "Coba lagi besok, atau lihat /stock KODE dan /scan.")
             return
         if not is_admin:
             used = db.ask_increment(conn, chat_id)
-    sisa = "" if is_admin else f" · sisa kuota {settings.ask_daily_limit - used}"
+    sisa = "" if is_admin else f" · sisa kuota {limit - used}"
     thinking = await m.answer(f"🤔 Menganalisis…{sisa}")
     try:
         with db.db() as conn:
@@ -409,6 +427,45 @@ async def cmd_unknown(m: types.Message) -> None:
     else:
         await m.answer("Saya hanya merespons perintah. Ketik /help untuk daftar perintah, "
                        "atau /ask &lt;pertanyaan&gt; untuk bertanya ke AI.")
+
+
+def _limits(conn, chat_id: int) -> dict[str, int]:
+    pro = db.plan_get(conn, chat_id) == "pro" or chat_id == settings.admin_chat_id
+    return {
+        "ask": settings.pro_ask_daily_limit if pro else settings.ask_daily_limit,
+        "watch": settings.pro_watchlist_max if pro else settings.free_watchlist_max,
+        "alerts": settings.pro_alerts_max if pro else settings.free_alerts_max,
+        "pro": pro,
+    }
+
+
+@router.message(Command("compare"))
+async def cmd_compare(m: types.Message, command: CommandObject) -> None:
+    codes = [c.upper() for c in (command.args or "").split()][:compare.MAX_CODES]
+    bad = [c for c in codes if not is_known_code(c)]
+    if len(codes) < 2 or bad:
+        await m.answer("Format: /compare KODE1 KODE2 [KODE3 KODE4] (2–4 saham dari universe)"
+                       + (f"\nTidak dikenal: {', '.join(bad)}" if bad else ""))
+        return
+    with db.db() as conn:
+        rows, series = await asyncio.to_thread(compare.build, conn, codes)
+    if len(rows) < 2:
+        await m.answer("Data belum cukup untuk dibandingkan.")
+        return
+    async with _chart_lock:
+        png = await asyncio.to_thread(compare.render_chart, series)
+    await m.answer_photo(FSInputFile(png))
+    await m.answer(fmt.compare(rows))
+
+
+@router.message(Command("sector"))
+async def cmd_sector(m: types.Message) -> None:
+    with db.db() as conn:
+        date_str, rows = await asyncio.to_thread(sector.build, conn)
+    if not rows:
+        await m.answer("Data belum tersedia.")
+        return
+    await m.answer(fmt.sector(date_str, rows))
 
 
 def _code_arg(command: CommandObject) -> str | None:

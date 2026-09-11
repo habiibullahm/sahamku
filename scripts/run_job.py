@@ -1,6 +1,7 @@
 """Jalankan satu job secara manual (tanpa Telegram, output ke stdout).
 
-Usage: python scripts/run_job.py eod|global|compute|news|premarket|aftermarket|weekly|chart [KODE]
+Usage: python scripts/run_job.py JOB [KODE]
+JOB: eod|global|compute|news|premarket|intraday|aftermarket|weekly|chart
 """
 
 from __future__ import annotations
@@ -13,9 +14,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sahamku import db  # noqa: E402
-from sahamku.analysis import aftermarket, premarket, weekly  # noqa: E402
+from sahamku.analysis import aftermarket, midday, premarket, weekly  # noqa: E402
 from sahamku.ingestion.eod import ingest, validate_eod  # noqa: E402
 from sahamku.ingestion.global_ import ingest_global  # noqa: E402
+from sahamku.ingestion.intraday import snapshot as intraday_snapshot  # noqa: E402
 from sahamku.news import ingest as news_ingest  # noqa: E402
 from sahamku.news import sentiment as news_sentiment  # noqa: E402
 from sahamku.pipeline import load_joined, recompute_all  # noqa: E402
@@ -53,6 +55,10 @@ def main() -> None:
                 n = news_ingest.ingest(conn)
                 a = asyncio.run(news_sentiment.analyze_pending(conn, limit=90))
                 print(f"{n} baru, {a} dianalisis")
+            case "intraday":
+                print("snapshot:", intraday_snapshot(conn))
+                r = midday.build(conn, watch_codes=["BBCA", "TLKM"])
+                print(_strip(fmt.midday(r)) if r else "no intraday data")
             case "weekly":
                 r = weekly.build(conn)
                 print(_strip(fmt.weekly(r)) if r else "no data")

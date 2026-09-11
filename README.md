@@ -62,16 +62,20 @@ docker compose down              # hentikan
 | `/ihsg` | Snapshot IHSG + chart + support/resistance |
 | `/news [KODE]` | Berita pasar/emiten dengan sentimen (🟢🔴⚪) |
 | `/screener rsi<35 above200` | Filter saham (rating, rsi, chg, vol, squeeze, breakout, golden, …) |
-| `/alert BBCA > 6500` / `/alerts` / `/unalert ID` | Alert level harga/RSI, dicek setelah close |
-| `/settings` | Pilih laporan yang diterima (pre-market, after-market, mingguan, alert) |
+| `/compare BBCA BBRI BMRI` | Return 1W/1M/3M, RSI, posisi vs SMA + chart normalisasi |
+| `/sector` | Rata-rata % per sektor, jumlah bullish/bearish, terbaik/terburuk |
+| `/alert BBCA > 6500` / `/alerts` / `/unalert ID` | Alert level harga/RSI, dicek tiap 15 menit (delayed) & setelah close |
+| `/settings` | Pilih laporan yang diterima (pre-market, tengah hari, after-market, mingguan, alert) |
 | `/stop` / `/resume` | Matikan/aktifkan semua laporan otomatis |
-| `/admin`, `/admin broadcast <pesan>` | Statistik & broadcast (hanya `ADMIN_CHAT_ID`) |
+| `/admin`, `/admin broadcast <pesan>`, `/admin pro\|free <chat_id>` | Statistik, broadcast, tier user (hanya `ADMIN_CHAT_ID`) |
 
 ## Jadwal (WIB, hari bursa; libur di `sahamku/universe.py`)
 
 | Jam | Job |
 |---|---|
 | 07:30 · 07:45 | Ingest aset global · ingest & analisis berita (Wall Street, Asia, minyak, emas, USD/IDR, UST10Y) |
+| 09:00–16:00 tiap 15 mnt | Snapshot intraday (delayed) + cek alert |
+| 12:15 (Jumat 11:45) | Ringkasan tengah hari (bot & channel) |
 | 08:15 | Kirim laporan pre-market (sentimen global, level S/R IHSG, sinyal kemarin, watchlist) |
 | 16:10 · 16:30 | Berita · ingest EOD LQ45+IHSG → validasi → indikator → sinyal. Retry tiap 15 menit s/d 18:00 jika belum lengkap |
 | 17:00 | Kirim laporan after-market (IHSG, top movers, sinyal bullish/bearish, squeeze, watchlist) |
@@ -91,6 +95,16 @@ python scripts/run_job.py premarket
 python scripts/run_job.py chart BBCA
 python -m sahamku.backtest.run         # tabel win rate per rule
 ```
+
+## Tier
+
+| | Free | Pro (`/admin pro <chat_id>`) |
+|---|---|---|
+| Watchlist | 5 | 30 |
+| Alert aktif | 3 | 20 |
+| `/ask` per hari | 10 | 50 |
+
+Pembayaran belum diintegrasikan; tier diberikan manual oleh admin.
 
 ## Sinyal
 

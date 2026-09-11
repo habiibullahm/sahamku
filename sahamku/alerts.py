@@ -65,8 +65,8 @@ class Triggered:
     date: str
 
 
-def check_all(conn: sqlite3.Connection) -> list[Triggered]:
-    """Evaluasi semua alert aktif terhadap bar terakhir. Tandai yang kena (one-shot)."""
+def check_all(conn: sqlite3.Connection, intraday: bool = False) -> list[Triggered]:
+    """Evaluasi alert aktif terhadap bar terakhir (EOD) atau harga intraday delayed."""
     rows = db.alerts_active(conn)
     if not rows:
         return []
@@ -75,12 +75,20 @@ def check_all(conn: sqlite3.Connection) -> list[Triggered]:
     for r in rows:
         code = r["code"]
         if code not in cache:
+            snap = db.intraday_get(conn, to_yf(code)) if intraday else None
+            if intraday and not snap:
+                continue
             j = load_joined(conn, to_yf(code), limit=1)
             if j.empty:
                 continue
             last = j.iloc[-1]
             rsi = None if last["rsi14"] != last["rsi14"] else float(last["rsi14"])
-            cache[code] = (j.index[-1].strftime("%Y-%m-%d"), float(last["close"]), rsi)
+            if snap:
+                # harga intraday; RSI tetap dari close terakhir (indikatif)
+                cache[code] = (f"{snap['date']} {snap['ts'][11:16]} (delayed)",
+                               float(snap["last"]), rsi)
+            else:
+                cache[code] = (j.index[-1].strftime("%Y-%m-%d"), float(last["close"]), rsi)
         date_str, close, rsi = cache[code]
         actual = close if r["metric"] == "close" else rsi
         if actual is None:

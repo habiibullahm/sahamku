@@ -27,6 +27,8 @@ COMMANDS = [
     BotCommand(command="ihsg", description="Snapshot IHSG + chart + support/resistance"),
     BotCommand(command="news", description="Berita pasar/emiten dengan sentimen"),
     BotCommand(command="screener", description="Filter saham, contoh: /screener rsi<35"),
+    BotCommand(command="compare", description="Bandingkan 2-4 saham + chart"),
+    BotCommand(command="sector", description="Ringkasan per sektor"),
     BotCommand(command="alert", description="Alert level, contoh: /alert BBCA > 6500"),
     BotCommand(command="alerts", description="Daftar alert aktif"),
     BotCommand(command="unalert", description="Hapus alert: /unalert ID"),
