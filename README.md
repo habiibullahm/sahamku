@@ -49,7 +49,7 @@ nano /opt/sahamku/.env # isi token & key
 cd /opt/sahamku && docker compose up -d --build
 ```
 
-Update kode di VPS: `cd /opt/sahamku && git pull && docker compose up -d --build`.
+Update kode di VPS (repo private): `bash scripts/deploy.sh`. Runbook lengkap: [docs/VPS.md](docs/VPS.md).
 Bawa DB dari laptop (opsional): `scp data/sahamku.db deploy@IP_VPS:/opt/sahamku/data/` sebelum `up`.
 
 ## Deploy ke Railway
