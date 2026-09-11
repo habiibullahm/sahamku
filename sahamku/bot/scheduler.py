@@ -12,7 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-from sahamku import alerts, db
+from sahamku import alerts, db, screener
 from sahamku.analysis import aftermarket, premarket, weekly
 from sahamku.config import TZ, settings
 from sahamku.ingestion.eod import ingest, validate_eod
@@ -149,6 +149,7 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
             await asyncio.to_thread(ingest, conn)
             ok, missing = validate_eod(conn, today)
             await asyncio.to_thread(recompute_all, conn)
+            screener.invalidate()
             if ok:
                 await _send_alerts(bot, conn)
         now = datetime.now(TZ)

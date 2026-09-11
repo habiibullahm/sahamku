@@ -9,6 +9,7 @@ from sahamku.analysis.premarket import PreMarketReport
 from sahamku.analysis.weekly import WeeklyReport
 from sahamku.config import DISCLAIMER, settings
 from sahamku.news import SENT_EMOJI, Headline
+from sahamku.screener import MAX_ROWS, Query, describe
 from sahamku.signals.scoring import RATING_EMOJI
 
 TELEGRAM_MAX = 4096
@@ -52,6 +53,22 @@ def news_list(code: str | None, items: list[Headline], hours: int) -> str:
     if not items:
         return f"{title}\nBelum ada berita {hours} jam terakhir."
     return "\n".join([f"{title} ({hours} jam terakhir)", *(_headline_line(h) for h in items)])
+
+
+def screener_result(date: str, q: Query, rows) -> str:
+    head = f"🔎 <b>Screener</b> <code>{escape(describe(q))}</code> — {date}"
+    if rows.empty:
+        return f"{head}\nTidak ada saham yang cocok."
+    more = f" (ditampilkan {MAX_ROWS})" if len(rows) > MAX_ROWS else ""
+    lines = [head, f"{len(rows)} saham{more}"]
+    for r in rows.head(MAX_ROWS).itertuples():
+        rsi = f"RSI {r.rsi:.0f}" if r.rsi is not None and r.rsi == r.rsi else "RSI n/a"
+        volx = (f" · vol {r.vol_x:.1f}x"
+                if r.vol_x and r.vol_x == r.vol_x and r.vol_x >= 1.5 else "")
+        lines.append(f"  {RATING_EMOJI[r.rating]} <code>{r.code}</code> {num(r.close)} "
+                     f"{pct(r.chg)} · {rsi} ({r.score:+d}){volx}")
+    lines += ["", "Detail: /stock KODE", f"<i>{DISCLAIMER}</i>"]
+    return _clip("\n".join(lines))
 
 
 def _narrative_block(text: str | None) -> list[str]:

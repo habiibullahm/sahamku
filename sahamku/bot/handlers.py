@@ -10,7 +10,7 @@ from aiogram import F, Router, types
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import FSInputFile
 
-from sahamku import alerts, db, news
+from sahamku import alerts, db, news, screener
 from sahamku.analysis import aftermarket, premarket
 from sahamku.config import settings
 from sahamku.llm import narrative
@@ -35,6 +35,7 @@ HELP = """<b>Sahamku</b> — daily scan saham LQ45
 /watchlist — lihat watchlist
 /ihsg — snapshot IHSG + chart + support/resistance
 /news [KODE] — berita pasar / emiten dengan sentimen
+/screener FILTER — filter saham (contoh: /screener rsi&lt;35 above200)
 /alert KODE > HARGA — alert level (contoh: /alert BBCA > 6500, /alert BBRI rsi < 30)
 /alerts — daftar alert · /unalert ID — hapus alert
 /ask pertanyaan — tanya AI (contoh: /ask kenapa BBCA turun?)
@@ -161,6 +162,23 @@ async def cmd_news(m: types.Message, command: CommandObject) -> None:
     with db.db() as conn:
         items = news.headlines(conn, hours=hours, code=code, limit=10)
     await m.answer(fmt.news_list(code, items, hours))
+
+
+@router.message(Command("screener"))
+async def cmd_screener(m: types.Message, command: CommandObject) -> None:
+    q = screener.parse(command.args or "")
+    if q.empty or q.errors:
+        msg = screener.HELP
+        if q.errors:
+            msg = f"Filter tidak dikenal: <code>{escape(' '.join(q.errors))}</code>\n\n" + msg
+        await m.answer(msg)
+        return
+    with db.db() as conn:
+        date_str, rows = await asyncio.to_thread(screener.run, conn, q)
+    if not date_str:
+        await m.answer("Data belum tersedia.")
+        return
+    await m.answer(fmt.screener_result(date_str, q, rows))
 
 
 @router.message(Command("alert"))
