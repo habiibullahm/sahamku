@@ -39,6 +39,19 @@ docker compose down              # hentikan
 - Jangan jalankan `python -m sahamku.bot.main` lokal bersamaan dengan container — Telegram hanya
   mengizinkan satu long-polling per bot.
 
+## Deploy ke VPS (Ubuntu 22.04/24.04)
+
+```bash
+ssh root@IP_VPS
+curl -fsSL https://raw.githubusercontent.com/habiibullahm/sahamku/main/scripts/vps_setup.sh -o setup.sh
+bash setup.sh          # update, user deploy, ufw, fail2ban, swap, Docker, clone ke /opt/sahamku
+nano /opt/sahamku/.env # isi token & key
+cd /opt/sahamku && docker compose up -d --build
+```
+
+Update kode di VPS: `cd /opt/sahamku && git pull && docker compose up -d --build`.
+Bawa DB dari laptop (opsional): `scp data/sahamku.db deploy@IP_VPS:/opt/sahamku/data/` sebelum `up`.
+
 ## Deploy ke Railway
 
 1. New Project → Deploy from GitHub repo → pilih repo ini (Dockerfile & `railway.json` terdeteksi).
