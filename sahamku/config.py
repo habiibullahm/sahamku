@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 16000
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
-    groq_max_tokens: int = 1024
+    groq_max_tokens: int = 2048
 
     @field_validator("admin_chat_id", "schedule_override_premarket",
                      "schedule_override_aftermarket", mode="before")

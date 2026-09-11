@@ -37,3 +37,24 @@ def test_pct_and_vol():
     assert fmt.pct(None) == "n/a"
     assert fmt.vol(2_500_000) == "2.5jt"
     assert fmt.vol(1_200_000_000) == "1.20M"
+
+
+def test_clip_keeps_html_lines_intact():
+    line = "<b>ABCD</b> <code>EFGH</code>\n"
+    text = line * 300  # > 4096
+    out = fmt._clip(text)
+    assert len(out) <= fmt.TELEGRAM_MAX
+    body = out.rsplit("\n…(terpotong)", 1)[0]
+    assert body.count("<b>") == body.count("</b>")
+    assert body.count("<code>") == body.count("</code>")
+
+
+def test_clip_plain_limit():
+    out = fmt.clip_plain("x" * 5000, 100)
+    assert len(out) <= 100 and out.endswith("(terpotong)")
+
+
+def test_cross_rules_shown_in_signal_block():
+    s = TickerSignals("BBRI", 3, "bullish", ["Golden cross SMA50>SMA200 (SMA50 1 / SMA200 2)"])
+    out = fmt._signal_block([s])
+    assert "Golden cross" in out

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from sahamku import db
-from sahamku.signals.rules import RULE_LABELS
+from sahamku.signals.rules import RULE_LABELS, STATE_RULES
 from sahamku.universe import IHSG, STOCK_TICKERS, from_yf
 
 
@@ -91,6 +91,8 @@ def _signals_by_code(conn: sqlite3.Connection, date_str: str) -> dict[str, Ticke
     for r in db.ratings_on(conn, date_str):
         out[from_yf(r["ticker"])] = TickerSignals(from_yf(r["ticker"]), r["score"], r["rating"])
     for r in db.signals_on(conn, date_str):
+        if r["rule"] in STATE_RULES:
+            continue
         code = from_yf(r["ticker"])
         label = RULE_LABELS.get(r["rule"], r["rule"])
         out[code].rules.append(f"{label} ({r['detail']})" if r["detail"] else label)

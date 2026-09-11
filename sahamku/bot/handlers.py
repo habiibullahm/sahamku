@@ -21,6 +21,8 @@ from sahamku.universe import is_known_code, to_yf
 
 log = logging.getLogger(__name__)
 router = Router()
+# matplotlib/pyplot tidak thread-safe → render chart satu per satu
+_chart_lock = asyncio.Lock()
 
 HELP = """<b>Sahamku</b> — daily scan saham LQ45
 
@@ -88,7 +90,8 @@ async def cmd_stock(m: types.Message, command: CommandObject) -> None:
         code, date_str, float(last["close"]), pct, float(last["volume"]), ind,
         rating["rating"] if rating else None, rating["score"] if rating else None, rules,
     )
-    png = await asyncio.to_thread(chart.render, code, j)
+    async with _chart_lock:
+        png = await asyncio.to_thread(chart.render, code, j)
     # caption Telegram maks 1024 char → kirim chart dan teks terpisah
     await m.answer_photo(FSInputFile(png))
     await m.answer(text)
@@ -140,7 +143,8 @@ async def cmd_ask(m: types.Message, command: CommandObject) -> None:
     except Exception:
         log.exception("ask failed")
         answer = "❌ Terjadi kesalahan saat memproses pertanyaan."
-    await thinking.edit_text(escape(answer))
+    # clip sebelum escape, sisakan ruang untuk entitas HTML (&amp; dll)
+    await thinking.edit_text(escape(fmt.clip_plain(answer, 3800)))
 
 
 @router.message(F.text)

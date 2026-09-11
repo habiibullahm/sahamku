@@ -44,7 +44,7 @@ def _signal_block(items: list[TickerSignals], limit: int = 10) -> str:
         return "  —"
     lines = []
     for s in items[:limit]:
-        rules = "; ".join(escape(r) for r in s.rules if "SMA200" not in r) or "tren"
+        rules = "; ".join(escape(r) for r in s.rules) or "tren"
         lines.append(f"  {RATING_EMOJI[s.rating]} <b>{s.code}</b> ({s.score:+d}) — {rules}")
     if len(items) > limit:
         lines.append(f"  … +{len(items) - limit} lainnya")
@@ -137,7 +137,18 @@ def stock_snapshot(code: str, date: str, close: float, pct_: float | None, volum
     return _clip("\n".join(lines))
 
 
-def _clip(text: str) -> str:
-    if len(text) <= TELEGRAM_MAX:
+def _clip(text: str, limit: int = TELEGRAM_MAX) -> str:
+    """Potong di batas baris supaya tag HTML tidak terbelah (tiap baris self-contained)."""
+    if len(text) <= limit:
         return text
-    return text[: TELEGRAM_MAX - 20] + "\n…(terpotong)"
+    suffix = "\n…(terpotong)"
+    cut = text.rfind("\n", 0, limit - len(suffix))
+    if cut <= 0:
+        cut = limit - len(suffix)
+    return text[:cut] + suffix
+
+
+def clip_plain(text: str, limit: int = TELEGRAM_MAX) -> str:
+    """Untuk teks tanpa HTML (jawaban LLM)."""
+    suffix = "\n…(terpotong)"
+    return text if len(text) <= limit else text[: limit - len(suffix)] + suffix

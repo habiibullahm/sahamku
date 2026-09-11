@@ -67,6 +67,9 @@ def evaluate_all(df: pd.DataFrame) -> pd.DataFrame:
     return out.fillna(False).astype(bool)
 
 
+# Rule "state" (posisi, bukan event) — ikut skor tapi tidak ditampilkan sebagai alasan sinyal
+STATE_RULES = {"above_sma200", "below_sma200"}
+
 RULE_DIRECTION = {
     "golden_cross": BULL, "death_cross": BEAR,
     "rsi_oversold": BULL, "rsi_overbought": BEAR,

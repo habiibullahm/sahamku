@@ -58,6 +58,9 @@ async def _groq(system: str, user: str) -> LLMResult:
         return LLMResult("", "❌ Tidak bisa terhubung ke layanan AI. Coba lagi.")
     choice = resp.choices[0] if resp.choices else None
     text = (choice.message.content or "").strip() if choice else ""
+    if choice and choice.finish_reason == "length" and text:
+        # model reasoning: token thinking ikut dihitung → jawaban bisa terpotong
+        text += "\n\n(jawaban terpotong karena batas panjang)"
     return LLMResult(text)
 
 

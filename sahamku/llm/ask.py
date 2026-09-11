@@ -25,13 +25,15 @@ Jangan pernah memberi perintah beli/jual eksplisit; sampaikan sebagai skenario &
 Akhiri jawaban dengan satu baris disclaimer singkat: "Bukan saran investasi."
 """
 
-_CODE_RE = re.compile(r"\b([A-Z]{4})\b")
+# Kode saham harus KAPITAL (atau diawali $) supaya kata biasa seperti "buka" tidak
+# dianggap ticker BUKA. Contoh valid: "BBCA", "$bbca".
+_CODE_RE = re.compile(r"(?<![A-Za-z])(?:\$([A-Za-z]{4})|([A-Z]{4}))(?![A-Za-z])")
 
 
 def detect_codes(text: str, max_codes: int = 3) -> list[str]:
-    found = []
-    for m in _CODE_RE.finditer(text.upper()):
-        c = m.group(1)
+    found: list[str] = []
+    for m in _CODE_RE.finditer(text):
+        c = (m.group(1) or m.group(2)).upper()
         if c in LQ45 and c not in found:
             found.append(c)
     return found[:max_codes]
@@ -42,9 +44,11 @@ def build_context(conn: sqlite3.Connection, codes: list[str]) -> str:
     pm = premarket.build(conn)
     if pm:
         glob = "; ".join(f"{n} {p:+.2f}%" for n, _, p in pm.global_rows if p is not None)
+        pct = f"{pm.ihsg_pct:+.2f}%" if pm.ihsg_pct is not None else "n/a"
+        rsi = f"{pm.ihsg_rsi:.1f}" if pm.ihsg_rsi is not None else "n/a"
         parts.append(
-            f"[IHSG] tanggal data {pm.date}, close {pm.ihsg_close:,.0f} ({pm.ihsg_pct:+.2f}%), "
-            f"RSI {pm.ihsg_rsi:.1f}, {pm.ihsg_trend}, support {pm.support:,.0f}, "
+            f"[IHSG] tanggal data {pm.date}, close {pm.ihsg_close:,.0f} ({pct}), "
+            f"RSI {rsi}, {pm.ihsg_trend}, support {pm.support:,.0f}, "
             f"resistance {pm.resistance:,.0f}. Sentimen global: {pm.sentiment_label}. "
             f"Global: {glob}"
         )
