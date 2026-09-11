@@ -105,8 +105,17 @@ Lalu `/admin` di Telegram → statistik harus berasal dari VPS.
 
 ```bash
 ssh sahamku-vps "sudo passwd ubuntu"      # ganti password bawaan provider
-ssh sahamku-vps "sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && sudo systemctl restart ssh"
+# sshd memakai nilai PERTAMA yang dibaca; cloud-init menulis "PasswordAuthentication yes" di
+# sshd_config.d/50-cloud-init.conf → file hardening harus bernama lebih awal (00-...)
+ssh sahamku-vps 'printf "PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+" | sudo tee /etc/ssh/sshd_config.d/00-hardening.conf >/dev/null && sudo sshd -t && sudo systemctl restart ssh && sudo sshd -T | grep -E "^(passwordauthentication|permitrootlogin)"'
+# verifikasi: harus ditolak
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password ubuntu@43.157.227.176 true
 ```
+
+Status saat ini: **sudah diterapkan** (password & root login nonaktif, hanya SSH key).
 
 ## Troubleshooting
 
