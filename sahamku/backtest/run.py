@@ -9,6 +9,7 @@ import argparse
 import logging
 import sqlite3
 from dataclasses import dataclass
+from html import escape
 
 import pandas as pd
 
@@ -74,7 +75,7 @@ def summary_text(results: list[RuleResult]) -> str:
              "rule · n · win% (5/10/20D) · avg ret% (10D)"]
     for r in results:
         lines.append(
-            f"• {RULE_LABELS.get(r.rule, r.rule)} · n={r.n} · "
+            f"• {escape(RULE_LABELS.get(r.rule, r.rule))} · n={r.n} · "
             f"{r.win_rate[5]:.0f}/{r.win_rate[10]:.0f}/{r.win_rate[20]:.0f}% · "
             f"{r.avg_return[10]:+.2f}%"
         )
