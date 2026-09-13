@@ -8,35 +8,35 @@ user `deploy`, berjalan sebagai container Docker `sahamku-bot`.
 
 | Tujuan | Perintah (dari laptop) |
 |---|---|
-| Masuk ke VPS | `ssh sahamku-vps` |
+| Masuk ke VPS | `ssh bot-vps` |
 | Deploy kode terbaru (setelah commit) | `bash scripts/deploy.sh` |
-| Lihat log bot | `ssh sahamku-vps "cd /opt/sahamku && sudo docker compose logs -f"` |
-| Restart bot | `ssh sahamku-vps "cd /opt/sahamku && sudo docker compose restart"` |
-| Ubah konfigurasi | `ssh sahamku-vps "sudo nano /opt/sahamku/.env"` lalu `sudo docker compose up -d` |
-| Cek status | `ssh sahamku-vps "sudo docker ps; free -m; df -h /"` |
-| Backup DB ke laptop | `ssh sahamku-vps "sudo cat /opt/sahamku/data/sahamku.db" > backup.db` |
+| Lihat log bot | `ssh bot-vps "cd /opt/sahamku && sudo docker compose logs -f"` |
+| Restart bot | `ssh bot-vps "cd /opt/sahamku && sudo docker compose restart"` |
+| Ubah konfigurasi | `ssh bot-vps "sudo nano /opt/sahamku/.env"` lalu `sudo docker compose up -d` |
+| Cek status | `ssh bot-vps "sudo docker ps; free -m; df -h /"` |
+| Backup DB ke laptop | `ssh bot-vps "sudo cat /opt/sahamku/data/sahamku.db" > backup.db` |
 
 ## Setup dari nol (apa yang dilakukan dan kenapa)
 
 ### 0. Akses SSH dengan key (laptop)
 
 ```bash
-ssh-keygen -t ed25519 -N "" -f ~/.ssh/sahamku_vps -C "sahamku-laptop"
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/bot_vps -C "bot-host-laptop"
 # daftarkan kunci publik ke VPS — satu-satunya langkah yang butuh password
-type $env:USERPROFILE\.ssh\sahamku_vps.pub | ssh ubuntu@IP "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+type $env:USERPROFILE\.ssh\bot_vps.pub | ssh ubuntu@IP "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
 ```
 
 `~/.ssh/config`:
 
 ```
-Host sahamku-vps
+Host bot-vps
   HostName 43.157.227.176
   User ubuntu
-  IdentityFile ~/.ssh/sahamku_vps
+  IdentityFile ~/.ssh/bot_vps
   IdentitiesOnly yes
 ```
 
-Kunci privat `~/.ssh/sahamku_vps` adalah satu-satunya jalan masuk setelah login password dimatikan —
+Kunci privat `~/.ssh/bot_vps` adalah satu-satunya jalan masuk setelah login password dimatikan —
 simpan cadangannya di password manager. Ganti laptop: tambahkan key baru ke `authorized_keys` dulu.
 
 ### 1–6. `scripts/vps_setup.sh` (dijalankan sekali sebagai root/sudo)
@@ -53,8 +53,8 @@ simpan cadangannya di password manager. Ganti laptop: tambahkan key baru ke `aut
 Cara menjalankan (repo private → kirim script lewat scp, bukan curl raw):
 
 ```bash
-scp scripts/vps_setup.sh sahamku-vps:/tmp/setup.sh
-ssh sahamku-vps "sudo bash /tmp/setup.sh"
+scp scripts/vps_setup.sh bot-vps:/tmp/setup.sh
+ssh bot-vps "sudo bash /tmp/setup.sh"
 ```
 
 Langkah 7 di script (`git clone`) gagal untuk repo private — abaikan, lanjut ke bagian berikut.
@@ -62,7 +62,7 @@ Langkah 7 di script (`git clone`) gagal untuk repo private — abaikan, lanjut k
 ### 7. Kode aplikasi
 
 ```bash
-git archive --format=tar HEAD | ssh sahamku-vps "sudo mkdir -p /opt/sahamku && sudo tar -x -C /opt/sahamku -f - && sudo chown -R deploy:deploy /opt/sahamku"
+git archive --format=tar HEAD | ssh bot-vps "sudo mkdir -p /opt/sahamku && sudo tar -x -C /opt/sahamku -f - && sudo chown -R deploy:deploy /opt/sahamku"
 ```
 
 Mengirim snapshot commit terakhir lewat pipa SSH; VPS tidak perlu kredensial GitHub.
@@ -71,14 +71,14 @@ Dibungkus di `scripts/deploy.sh` (kirim + `docker compose up -d --build` + cek l
 ### 8. Konfigurasi & data
 
 ```bash
-scp .env sahamku-vps:/tmp/sahamku.env && ssh sahamku-vps "sudo mv /tmp/sahamku.env /opt/sahamku/.env && sudo chmod 600 /opt/sahamku/.env && sudo chown deploy:deploy /opt/sahamku/.env"
+scp .env bot-vps:/tmp/sahamku.env && ssh bot-vps "sudo mv /tmp/sahamku.env /opt/sahamku/.env && sudo chmod 600 /opt/sahamku/.env && sudo chown deploy:deploy /opt/sahamku/.env"
 ```
 
 DB dari laptop (opsional, membawa watchlist/alert/user). Salin lewat SQLite backup API agar konsisten:
 
 ```bash
 python -c "import sqlite3; s=sqlite3.connect('data/sahamku.db'); d=sqlite3.connect('snap.db'); s.backup(d)"
-scp snap.db sahamku-vps:/tmp/sahamku.db && ssh sahamku-vps "sudo mkdir -p /opt/sahamku/data && sudo mv /tmp/sahamku.db /opt/sahamku/data/sahamku.db && sudo chown -R deploy:deploy /opt/sahamku/data"
+scp snap.db bot-vps:/tmp/sahamku.db && ssh bot-vps "sudo mkdir -p /opt/sahamku/data && sudo mv /tmp/sahamku.db /opt/sahamku/data/sahamku.db && sudo chown -R deploy:deploy /opt/sahamku/data"
 ```
 
 Tanpa DB, entrypoint container backfill 3 tahun otomatis (±2 menit).
@@ -87,7 +87,7 @@ Tanpa DB, entrypoint container backfill 3 tahun otomatis (±2 menit).
 
 ```bash
 docker compose down                                   # di laptop — WAJIB dulu
-ssh sahamku-vps "cd /opt/sahamku && sudo docker compose up -d --build"
+ssh bot-vps "cd /opt/sahamku && sudo docker compose up -d --build"
 ```
 
 Telegram hanya mengizinkan satu `getUpdates` per bot; dua instance → error `Conflict`.
@@ -95,8 +95,8 @@ Telegram hanya mengizinkan satu `getUpdates` per bot; dua instance → error `Co
 ### 10. Verifikasi
 
 ```bash
-ssh sahamku-vps "cd /opt/sahamku && sudo docker compose logs --since 2m | grep -E 'Run polling|next run|Traceback'"
-ssh sahamku-vps "sudo docker inspect sahamku-bot --format 'status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}'"
+ssh bot-vps "cd /opt/sahamku && sudo docker compose logs --since 2m | grep -E 'Run polling|next run|Traceback'"
+ssh bot-vps "sudo docker inspect sahamku-bot --format 'status={{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}'"
 ```
 
 Lalu `/admin` di Telegram → statistik harus berasal dari VPS.
@@ -104,10 +104,10 @@ Lalu `/admin` di Telegram → statistik harus berasal dari VPS.
 ### 11. Hardening akhir (setelah login key terbukti lancar)
 
 ```bash
-ssh sahamku-vps "sudo passwd ubuntu"      # ganti password bawaan provider
+ssh bot-vps "sudo passwd ubuntu"      # ganti password bawaan provider
 # sshd memakai nilai PERTAMA yang dibaca; cloud-init menulis "PasswordAuthentication yes" di
 # sshd_config.d/50-cloud-init.conf → file hardening harus bernama lebih awal (00-...)
-ssh sahamku-vps 'printf "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\n" | sudo tee /etc/ssh/sshd_config.d/00-hardening.conf >/dev/null && sudo sshd -t && sudo systemctl restart ssh && sudo sshd -T | grep -E "^(passwordauthentication|permitrootlogin)"'
+ssh bot-vps 'printf "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\n" | sudo tee /etc/ssh/sshd_config.d/00-hardening.conf >/dev/null && sudo sshd -t && sudo systemctl restart ssh && sudo sshd -T | grep -E "^(passwordauthentication|permitrootlogin)"'
 # verifikasi: harus ditolak
 ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password ubuntu@43.157.227.176 true
 ```

@@ -41,7 +41,7 @@ docker compose down              # hentikan
 
 ## Deploy ke VPS (Ubuntu 22.04/24.04)
 
-Untuk setup awal, ikuti [runbook VPS](docs/VPS.md). Setelah alias SSH `sahamku-vps`
+Untuk setup awal, ikuti [runbook VPS](docs/VPS.md). Setelah alias SSH `bot-vps`
 tersedia dan `/opt/sahamku/.env` sudah diisi, deploy setiap commit dengan:
 
 ```bash
@@ -49,7 +49,7 @@ bash scripts/deploy.sh
 ```
 
 Skrip mengirim snapshot commit saat ini ke `/opt/sahamku`, membangun image Docker, dan mengganti
-container. VPS tidak membutuhkan akses GitHub. Untuk verifikasi: `ssh sahamku-vps "cd /opt/sahamku && sudo docker compose ps"`.
+container. VPS tidak membutuhkan akses GitHub. Untuk verifikasi: `ssh bot-vps "cd /opt/sahamku && sudo docker compose ps"`.
 
 ## Command
 

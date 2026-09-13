@@ -159,7 +159,7 @@ Estimasi per `/ask` dengan Opus 5 ≈ $0,04–0,07; top-up $5–10 cukup untuk u
 
 ### SSH & kunci
 - Pasangan kunci `ssh-keygen -t ed25519`: privat di laptop (rahasia), publik di server (`~/.ssh/authorized_keys`).
-- Alias di `~/.ssh/config` (`Host sahamku-vps`) → cukup `ssh sahamku-vps`.
+- Alias di `~/.ssh/config` (`Host bot-vps`) → cukup `ssh bot-vps`.
 - Image Ubuntu cloud (Tencent/Cloudeka) menonaktifkan `root`; user default `ubuntu` dengan sudo.
 - Matikan login password: `PasswordAuthentication no`. **Jebakan**: sshd memakai nilai **pertama** yang dibaca, dan cloud-init menulis `yes` di `sshd_config.d/50-cloud-init.conf` → file hardening harus bernama lebih awal (`00-hardening.conf`). Verifikasi dengan `sshd -T`.
 - Jangan pernah mengirim password/key privat lewat chat; kalau terlanjur, ganti.

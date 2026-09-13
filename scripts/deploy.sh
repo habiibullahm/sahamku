@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Deploy kode dari laptop ke VPS tanpa akses GitHub di VPS (repo private):
 # kirim `git archive HEAD` lewat SSH, lalu rebuild container.
-#   bash scripts/deploy.sh [ssh-alias]   (default: sahamku-vps)
+#   bash scripts/deploy.sh [ssh-alias]   (default: bot-vps)
 set -euo pipefail
-HOST="${1:-sahamku-vps}"
+HOST="${1:-bot-vps}"
 APP_DIR="/opt/sahamku"
 cd "$(dirname "$0")/.."
 echo "==> kirim $(git rev-parse --short HEAD) ke $HOST:$APP_DIR"
