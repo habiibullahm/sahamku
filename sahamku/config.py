@@ -30,8 +30,16 @@ class Settings(BaseSettings):
     # Channel publik untuk broadcast laporan (mis. "@sahamku_id"); bot harus admin channel
     channel_id: str | None = None
     bot_username: str = "sahamku_id_bot"
-    # Universe saham: lq45 | idx80
-    universe: str = "lq45"
+    # Universe saham: lq45 | idx80 | liquid
+    universe: str = "liquid"
+    universe_min_coverage: float = 0.90
+    liquidity_min_history: int = 200
+    liquidity_min_traded_20: int = 18
+    liquidity_min_traded_60: int = 50
+    liquidity_min_value_20: float = 5_000_000_000
+    liquidity_min_value_60: float = 3_000_000_000
+    liquidity_min_close: float = 50.0
+    potential_growth_min_score: float = 60.0
     # Kuota /ask per chat per hari (admin bebas kuota)
     ask_daily_limit: int = 10
     # Batas tier Free vs Pro (Pro diberikan admin: /admin pro <chat_id>)

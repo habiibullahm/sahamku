@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import date
 
 from sahamku.config import settings
@@ -25,8 +26,10 @@ IDX80_EXTRA = [
     "SRTG", "SSIA", "TINS", "TKIM", "TPIA",
 ]
 
-# Universe aktif ditentukan oleh UNIVERSE=lq45|idx80 di .env
-STOCKS: list[str] = LQ45 + (IDX80_EXTRA if settings.universe.lower() == "idx80" else [])
+# Compatibility fallback for callers without a DB connection. Liquid mode falls back to IDX80
+# until a broad securities master has been imported.
+IDX80 = LQ45 + IDX80_EXTRA
+STOCKS: list[str] = LQ45 if settings.universe.lower() == "lq45" else IDX80
 
 
 # Alias nama perusahaan (lowercase-insensitive) untuk deteksi berita
@@ -70,12 +73,65 @@ def from_yf(ticker: str) -> str:
     return ticker[:-3] if ticker.endswith(".JK") else ticker
 
 
-def is_known_code(code: str) -> bool:
-    return code.upper() in STOCKS
+def active_codes(conn: sqlite3.Connection | None = None) -> list[str]:
+    """Return codes for configured universe; liquid uses the imported securities master."""
+    mode = settings.universe.lower()
+    if mode == "lq45":
+        return list(LQ45)
+    if mode == "idx80":
+        return list(IDX80)
+    if conn is not None:
+        rows = conn.execute(
+            "SELECT code FROM securities WHERE lower(status)='active' "
+            "AND lower(instrument_type) IN ('stock','common stock','saham') ORDER BY code"
+        ).fetchall()
+        if rows:
+            return [r["code"] for r in rows]
+    return list(IDX80)
+
+
+def active_tickers(conn: sqlite3.Connection | None = None) -> list[str]:
+    return [to_yf(c) for c in active_codes(conn)]
+
+
+def scan_tickers(conn: sqlite3.Connection, date_str: str | None = None) -> list[str]:
+    """Eligible liquid tickers after scoring, or the selected static universe."""
+    if settings.universe.lower() == "liquid" and date_str:
+        rows = conn.execute(
+            "SELECT ticker FROM universe_eligibility WHERE date=? AND eligible=1 ORDER BY ticker",
+            (date_str,),
+        ).fetchall()
+        if rows or conn.execute(
+            "SELECT 1 FROM universe_eligibility WHERE date=? LIMIT 1", (date_str,)
+        ).fetchone():
+            return [r["ticker"] for r in rows]
+    return active_tickers(conn)
+
+
+def universe_label(conn: sqlite3.Connection | None = None) -> str:
+    mode = settings.universe.lower()
+    if mode == "lq45":
+        return "LQ45"
+    if mode == "idx80":
+        return "IDX80"
+    if conn is not None and conn.execute(
+        "SELECT 1 FROM securities WHERE lower(status)='active' "
+        "AND lower(instrument_type) IN ('stock','common stock','saham') LIMIT 1"
+    ).fetchone():
+        return "universe liquid"
+    return "IDX80 (fallback; master IDX belum diimpor)"
+
+
+def is_known_code(code: str, conn: sqlite3.Connection | None = None) -> bool:
+    return code.upper() in active_codes(conn)
 
 
 STOCK_TICKERS = [to_yf(c) for c in STOCKS]
 ALL_EOD_TICKERS = [IHSG, *STOCK_TICKERS]
+
+
+def all_eod_tickers(conn: sqlite3.Connection | None = None) -> list[str]:
+    return [IHSG, *active_tickers(conn)]
 
 # Aset global untuk analisis pre-market
 GLOBAL_TICKERS: dict[str, str] = {

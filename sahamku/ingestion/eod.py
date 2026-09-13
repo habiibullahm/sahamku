@@ -10,7 +10,8 @@ import pandas as pd
 import yfinance as yf
 
 from sahamku import db
-from sahamku.universe import ALL_EOD_TICKERS
+from sahamku.config import settings
+from sahamku.universe import IHSG, all_eod_tickers
 
 log = logging.getLogger(__name__)
 
@@ -49,17 +50,21 @@ def fetch_history(tickers: list[str], start: date | None = None, period: str | N
 def ingest(conn: sqlite3.Connection, tickers: list[str] | None = None,
            lookback_days: int = 10, table: str = "ohlcv") -> dict[str, int]:
     """Tarik N hari terakhir dan upsert. Return {ticker: rows}."""
-    tickers = tickers or ALL_EOD_TICKERS
+    tickers = tickers or all_eod_tickers(conn)
     start = date.today() - timedelta(days=lookback_days)
-    data = fetch_history(tickers, start=start)
-    counts = {t: db.upsert_ohlcv(conn, t, df, table=table) for t, df in data.items()}
+    counts: dict[str, int] = {}
+    for i in range(0, len(tickers), 50):
+        data = fetch_history(tickers[i:i + 50], start=start)
+        counts.update({t: db.upsert_ohlcv(conn, t, df, table=table)
+                       for t, df in data.items()})
+        conn.commit()
     log.info("ingested %d/%d tickers into %s", len(counts), len(tickers), table)
     return counts
 
 
 def backfill(conn: sqlite3.Connection, tickers: list[str] | None = None,
              period: str = "3y", table: str = "ohlcv") -> dict[str, int]:
-    tickers = tickers or ALL_EOD_TICKERS
+    tickers = tickers or all_eod_tickers(conn)
     counts: dict[str, int] = {}
     # batch 15 ticker supaya request tidak terlalu besar
     for i in range(0, len(tickers), 15):
@@ -75,7 +80,10 @@ def backfill(conn: sqlite3.Connection, tickers: list[str] | None = None,
 def validate_eod(conn: sqlite3.Connection, trading_date: date,
                  tickers: list[str] | None = None) -> tuple[bool, list[str]]:
     """Cek semua ticker punya bar untuk trading_date. Return (lengkap?, missing)."""
-    tickers = tickers or ALL_EOD_TICKERS
+    tickers = tickers or all_eod_tickers(conn)
     have = db.tickers_with_date(conn, trading_date.isoformat())
     missing = [t for t in tickers if t not in have]
-    return (len(missing) == 0, missing)
+    stocks = [t for t in tickers if t != IHSG]
+    covered = sum(t in have for t in stocks)
+    ratio = covered / len(stocks) if stocks else 0.0
+    return (IHSG in have and ratio >= settings.universe_min_coverage, missing)

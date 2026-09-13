@@ -32,6 +32,17 @@ def test_premarket_renders():
     assert "BEARISH" in out and "S&amp;P 500" in out and "n/a" in out and "catatan" in out
 
 
+def test_monday_wording_and_zero_index_volume_hidden():
+    p = PreMarketReport(
+        date="2026-09-14", sentiment_score=0, sentiment_label="MENUNGGU DATA TERBARU",
+        global_rows=[], ihsg_close=6500, ihsg_pct=-1, ihsg_rsi=45, ihsg_trend="turun",
+        support=6400, resistance=6600, ihsg_source_date="2026-09-11",
+    )
+    assert "Penutupan Jumat" in fmt.premarket(p)
+    out = fmt.ihsg_snapshot("2026-09-11", 6500, -1, 0, {}, 6400, 6600, "turun")
+    assert "Vol 0" not in out
+
+
 def test_pct_and_vol():
     assert fmt.pct(1.234) == "▲ +1.23%"
     assert fmt.pct(None) == "n/a"

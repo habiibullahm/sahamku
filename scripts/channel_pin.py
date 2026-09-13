@@ -19,7 +19,7 @@ from sahamku.config import DISCLAIMER, settings  # noqa: E402
 
 PINNED = f"""📌 <b>Selamat datang di Sahamku Daily</b>
 
-Ringkasan harian saham IHSG (LQ45), otomatis setiap hari bursa:
+Ringkasan harian saham liquid IDX, otomatis setiap hari bursa:
 
 🌅 <b>08:15 WIB — Pre-Market</b>
 Sentimen global semalam, level support/resistance IHSG, catatan sektor, sinyal dari scan kemarin.

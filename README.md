@@ -1,6 +1,6 @@
 # Sahamku
 
-Bot Telegram (`@sahamku_id_bot`) untuk daily scan saham IHSG (LQ45): laporan **pre-market** dan
+Bot Telegram (`@sahamku_id_bot`) untuk daily scan saham liquid IDX: laporan **pre-market** dan
 **after-market** otomatis, sinyal teknikal rule-based, chart, watchlist, dan `/ask` berbasis Claude.
 
 > ⚠️ Bukan saran investasi. Semua sinyal bersifat analitis dari data historis.
@@ -69,6 +69,7 @@ Bawa DB dari laptop (opsional): `scp data/sahamku.db deploy@IP_VPS:/opt/sahamku/
 | Command | Fungsi |
 |---|---|
 | `/scan` | Laporan after-market dari data terakhir |
+| `/growth` | Ranking hingga 20 kandidat Potential Growth (teknikal, bukan prediksi multibagger) |
 | `/stock BBCA` | Snapshot harga, indikator, rating, sinyal + chart 60 hari |
 | `/watch BBCA` / `/unwatch BBCA` / `/watchlist` | Watchlist per chat; ikut dilaporkan di pre/after-market |
 | `/ask kenapa BBCA turun?` | Tanya AI dengan konteks harga, indikator, sinyal, S/R, berita; ingat percakapan 2 jam (`/ask clear`) |
@@ -90,7 +91,7 @@ Bawa DB dari laptop (opsional): `scp data/sahamku.db deploy@IP_VPS:/opt/sahamku/
 | 09:00–16:00 tiap 15 mnt | Snapshot intraday (delayed) + cek alert |
 | 12:15 (Jumat 11:45) | Ringkasan tengah hari (bot & channel) |
 | 08:15 | Kirim laporan pre-market (sentimen global, level S/R IHSG, sinyal kemarin, watchlist) |
-| 16:10 · 16:30 | Berita · ingest EOD LQ45+IHSG → validasi → indikator → sinyal. Retry tiap 15 menit s/d 18:00 jika belum lengkap |
+| 16:10 · 16:30 | Berita · ingest EOD universe aktif+IHSG → validasi → indikator, sinyal, dan Potential Growth. Retry tiap 15 menit s/d 18:00 jika belum lengkap |
 | 17:00 | Kirim laporan after-market (IHSG, top movers, sinyal bullish/bearish, squeeze, watchlist) |
 | Sabtu 09:00 · 09:15 | Rekap mingguan (user & channel) · backtest ke admin |
 
@@ -106,8 +107,27 @@ python scripts/run_job.py compute      # hitung ulang indikator & sinyal
 python scripts/run_job.py aftermarket  # print laporan
 python scripts/run_job.py premarket
 python scripts/run_job.py chart BBCA
+python scripts/update_universe.py idx-stocks.csv       # validasi master saham
+python scripts/update_universe.py idx-stocks.csv --apply # impor setelah lolos validasi
 python -m sahamku.backtest.run         # tabel win rate per rule
 ```
+
+CSV master memakai UTF-8 dengan kolom `code,name,sector,board,instrument_type,status`.
+
+Untuk sumber KSEI, unduh **Master File Efek** lalu normalisasi dahulu. Proses ini hanya
+menyertakan `EQUITY` yang `ACTIVE`, terdaftar di `IDX`, dan memiliki kode empat huruf:
+
+```bash
+python scripts/normalize_ksei_master.py data/source/StatisEfek20260831.txt.zip \
+  --output data/source/idx-stocks-2026-08-31.csv
+python scripts/update_universe.py data/source/idx-stocks-2026-08-31.csv --apply \
+  --source-date 2026-08-31
+```
+
+Master KSEI tidak memuat papan pencatatan IDX. CSV hasilnya menetapkan `board=Unknown`
+secara eksplisit; tambahkan enrichment dari ekspor daftar saham IDX apabila board diperlukan.
+Gunakan `--source-date YYYY-MM-DD` bila tanggal sumber berbeda dari tanggal impor. Setelah impor,
+restart bot agar ticker baru di-backfill; selama master belum tersedia mode `liquid` memakai IDX80.
 
 ## Tier
 
@@ -146,7 +166,7 @@ Return dihitung searah sinyal. Periode ini IHSG cenderung turun, sehingga rule m
 
 ```
 sahamku/
-  config.py        env & threshold          universe.py   LQ45, ticker global, libur bursa
+  config.py        env & threshold          universe.py   universe IDX, global, libur bursa
   db.py            SQLite                   pipeline.py   OHLCV → indikator → sinyal → rating
   ingestion/       eod.py, global_.py       indicators/   technical.py
   signals/         rules.py, scoring.py     analysis/     premarket.py, aftermarket.py
@@ -161,6 +181,6 @@ tests/
 
 - Data dari Yahoo Finance (gratis, EOD). Bisa telat/gap — `validate_eod` + retry menanganinya; laporan
   parsial diberi tanda ticker yang hilang.
-- Daftar LQ45/IDX80 & libur bursa perlu diperbarui manual (rebalancing Feb/Agu; SK libur tahunan BEI).
-  Universe dipilih lewat `UNIVERSE=lq45|idx80`; ticker baru di-backfill otomatis saat bot start.
+- Universe dipilih lewat `UNIVERSE=lq45|idx80|liquid`. Mode liquid memakai master CSV IDX tervalidasi;
+  jika belum diimpor, bot memakai IDX80 sebagai fallback dan memberi label secara eksplisit.
 - `.env`, `*.db`, dan `charts/` tidak di-commit.

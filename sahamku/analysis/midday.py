@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from sahamku import db
 from sahamku.analysis.aftermarket import Mover
-from sahamku.universe import IHSG, STOCK_TICKERS, from_yf
+from sahamku.universe import IHSG, from_yf, scan_tickers
 
 
 @dataclass
@@ -33,7 +33,7 @@ def build(conn: sqlite3.Connection, watch_codes: list[str] | None = None,
     by = {r["ticker"]: r for r in rows}
     ihsg = by.get(IHSG)
     movers: list[Mover] = []
-    for t in STOCK_TICKERS:
+    for t in scan_tickers(conn, db.latest_date(conn)):
         r = by.get(t)
         if not r or not r["prev_close"]:
             continue

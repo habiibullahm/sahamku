@@ -10,7 +10,7 @@ import sqlite3
 
 from sahamku import db
 from sahamku.llm.providers import generate
-from sahamku.universe import NAME_ALIASES, STOCKS
+from sahamku.universe import NAME_ALIASES, active_codes
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ BATCH = 15
 TIMEOUT_S = 45
 
 SYSTEM = """Kamu analis berita pasar modal Indonesia. Untuk setiap berita, tentukan:
-- "tickers": daftar kode saham LQ45 yang benar-benar menjadi subjek berita (bukan sekadar disebut),
+- "tickers": daftar kode saham dari universe aktif yang benar-benar menjadi subjek berita,
   hanya dari daftar berikut: {codes}. Kosongkan [] jika tidak ada.
 - "sentiment": dampak untuk harga saham terkait (atau pasar/IHSG jika tanpa ticker):
   1 positif, -1 negatif, 0 netral/tidak relevan.
@@ -32,9 +32,13 @@ _ARRAY = re.compile(r"\[.*\]", re.S)
 _OBJ = re.compile(r"\{[^{}]*\}")
 
 
-def _system() -> str:
-    aliases = "; ".join(f"{k}={'/'.join(v[:2])}" for k, v in NAME_ALIASES.items())
-    return SYSTEM.format(codes=", ".join(STOCKS), aliases=aliases)
+def _system(conn: sqlite3.Connection | None = None) -> str:
+    # The static aliases are concise. Adding every name in the liquid master
+    # makes each news batch needlessly large; rule_tickers already matches
+    # exact master names before this LLM step.
+    alias_rows = [f"{k}={'/'.join(v[:2])}" for k, v in NAME_ALIASES.items()]
+    aliases = "; ".join(alias_rows)
+    return SYSTEM.format(codes=", ".join(active_codes(conn)), aliases=aliases)
 
 
 def _parse(text: str) -> list[dict]:
@@ -69,7 +73,7 @@ async def analyze_pending(conn: sqlite3.Connection, limit: int = 120) -> int:
             f"{i}. [{r['source']}] {r['title']} — {r['summary'][:160]}"
             for i, r in enumerate(chunk))
         try:
-            res = await asyncio.wait_for(generate(_system(), payload), TIMEOUT_S)
+            res = await asyncio.wait_for(generate(_system(conn), payload), TIMEOUT_S)
         except Exception:
             log.warning("sentimen batch gagal", exc_info=True)
             continue
@@ -81,7 +85,8 @@ async def analyze_pending(conn: sqlite3.Connection, limit: int = 120) -> int:
             d = by_i.get(i)
             if not d:
                 continue
-            tickers = [t for t in (d.get("tickers") or []) if isinstance(t, str) and t in STOCKS]
+            known = set(active_codes(conn))
+            tickers = [t for t in (d.get("tickers") or []) if isinstance(t, str) and t in known]
             # gabung dengan deteksi rule-based (ticker eksplisit di judul)
             for t in (r["tickers"] or "").split(","):
                 if t and t not in tickers:

@@ -41,8 +41,16 @@ def build(conn: sqlite3.Connection) -> tuple[str, list[SectorRow]]:
     if df.empty:
         return "", []
     by = {r.code: r for r in df.itertuples()}
-    mapped = {c for codes in SECTORS.values() for c in codes}
-    sectors = dict(SECTORS)
+    master = conn.execute(
+        "SELECT code,sector FROM securities WHERE lower(status)='active'"
+    ).fetchall()
+    if master:
+        sectors: dict[str, list[str]] = {}
+        for r in master:
+            sectors.setdefault(r["sector"] or "Lainnya", []).append(r["code"])
+    else:
+        sectors = dict(SECTORS)
+    mapped = {c for codes in sectors.values() for c in codes}
     rest = [c for c in by if c not in mapped]
     if rest:
         sectors["Lainnya"] = rest

@@ -1,4 +1,4 @@
-"""Tarik histori awal: 3 tahun LQ45+IHSG, 1 tahun aset global, lalu hitung indikator & sinyal.
+"""Tarik histori awal: 3 tahun universe aktif+IHSG dan 1 tahun aset global.
 
 Usage: python scripts/backfill.py [--period 3y] [--skip-global]
 """

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import date
 from html import escape
 
 from sahamku.analysis.aftermarket import AfterMarketReport, Mover, TickerSignals
 from sahamku.analysis.compare import Row as CompareRow
+from sahamku.analysis.growth import GrowthCandidate
 from sahamku.analysis.midday import MiddayReport
 from sahamku.analysis.premarket import PreMarketReport
 from sahamku.analysis.sector import SectorRow
@@ -184,26 +186,51 @@ def _signal_block(items: list[TickerSignals], limit: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _growth_line(g: GrowthCandidate, detailed: bool = False) -> str:
+    why = ", ".join(escape(x) for x in g.explanations) or "skor teknikal"
+    risk = escape(g.risk_flags[0]) if g.risk_flags else "tanpa flag utama"
+    if detailed:
+        rel = f"{g.rel_60:+.1f}%" if g.rel_60 is not None else "n/a"
+        value = (f"Rp{g.median_value_20 / 1e9:.1f} miliar" if g.median_value_20 is not None
+                 else "n/a")
+        return (f"  <b>{g.code}</b> {g.total:.1f} · L{g.liquidity:.0f} M{g.momentum:.0f} "
+                f"T{g.trend:.0f} B{g.breakout:.0f} AR{g.accumulation_risk:.0f}\n"
+                f"    rel60 {rel} · median20 {value} · {why} · risiko: {risk}")
+    return f"  <b>{g.code}</b> {g.total:.1f} — {why} · risiko: {risk}"
+
+
 def aftermarket(r: AfterMarketReport, cta: bool = False,
                 narrative: str | None = None) -> str:
+    volume_line = f" · Vol {vol(r.ihsg_volume)}" if r.ihsg_volume and r.ihsg_volume > 0 else ""
+    signal_preview = []
+    if r.bullish:
+        signal_preview.append(_signal_block(r.bullish[:1]))
+    if r.bearish:
+        signal_preview.append(_signal_block(r.bearish[:1]))
     parts = [
         f"📊 <b>Sahamku — After Market {r.date}</b>",
         "",
-        f"<b>IHSG</b> {num(r.ihsg_close, 2)}  {pct(r.ihsg_pct)}",
-        f"Vol {vol(r.ihsg_volume)} · ▲{r.advancers} ▼{r.decliners} •{r.unchanged} (LQ45)",
+        "🇮🇩 <b>Market Overview</b>",
+        f"IHSG {num(r.ihsg_close, 2)} {pct(r.ihsg_pct)}{volume_line}",
+        f"RSI {num(r.ihsg_rsi, 1)} · {escape(r.ihsg_trend)}",
+        f"S {num(r.support)} · R {num(r.resistance)}",
+        f"Breadth {escape(r.universe)} ({r.eligible_count} saham): "
+        f"▲{r.advancers} ▼{r.decliners} •{r.unchanged}",
+        f"Cakupan data {r.coverage_pct:.0f}%" + ("" if r.data_complete else " ⚠️ parsial"),
         *_narrative_block(narrative),
         "",
-        "🚀 <b>Top Gainers</b>",
-        *(_mover_line(m) for m in r.gainers),
+        "⚡ <b>Liquid Momentum</b> (kekuatan relatif, bukan sinyal beli)",
+        *([_growth_line(g) for g in r.liquid_momentum] or ["  —"]),
         "",
-        "📉 <b>Top Losers</b>",
-        *(_mover_line(m) for m in r.losers),
+        "🌱 <b>Potential Growth</b> (skor teknikal 0–100)",
+        *([_growth_line(g) for g in r.growth_candidates]
+          or ["  Belum ada yang lolos skor minimum"]),
         "",
-        f"🟢 <b>Sinyal Bullish</b> ({len(r.bullish)})",
-        _signal_block(r.bullish),
+        "🚀 <b>Top Gainers</b>", *(_mover_line(m) for m in r.gainers[:3]),
+        "📉 <b>Top Losers</b>", *(_mover_line(m) for m in r.losers[:3]),
         "",
-        f"🔴 <b>Sinyal Bearish</b> ({len(r.bearish)})",
-        _signal_block(r.bearish),
+        f"<b>Sinyal teknikal</b>: 🟢{len(r.bullish)} bullish · 🔴{len(r.bearish)} bearish",
+        *signal_preview,
     ]
     if r.squeeze:
         parts += ["", "🎯 <b>Bollinger Squeeze</b>: " + ", ".join(r.squeeze)]
@@ -216,26 +243,49 @@ def aftermarket(r: AfterMarketReport, cta: bool = False,
             rt = f" {RATING_EMOJI[s.rating]} {s.rating} ({s.score:+d})" if s else ""
             parts.append(f"  <code>{code}</code> {num(m.close)} {pct(m.pct)}{rt}")
     if r.missing:
-        parts += ["", "⚠️ Data belum lengkap untuk: " + ", ".join(r.missing)]
+        shown = ", ".join(r.missing[:5])
+        more = f" +{len(r.missing) - 5}" if len(r.missing) > 5 else ""
+        parts += ["", f"⚠️ Data belum lengkap: {shown}{more}"]
+    if r.watch_tomorrow:
+        parts += ["", "👁 <b>Watch Tomorrow</b>",
+                  *(f"  • {escape(x)}" for x in r.watch_tomorrow)]
     if cta:
         parts += ["", cta_line()]
     parts += ["", f"<i>{DISCLAIMER}</i>"]
     return _clip("\n".join(parts))
 
 
+def growth_report(date_str: str, items: list[GrowthCandidate], universe: str) -> str:
+    minimum = settings.potential_growth_min_score
+    lines = [f"🌱 <b>Potential Growth — {date_str}</b>",
+             f"Universe: {escape(universe)} · skor minimum {minimum:.0f}",
+             "Skor: L likuiditas · M momentum · T tren · B breakout · AR akumulasi/risiko", ""]
+    lines += [_growth_line(g, detailed=True) for g in items] or ["Belum ada saham yang lolos."]
+    lines += ["", "Skor adalah hasil penyaringan teknikal, bukan prediksi multibagger.",
+              f"<i>{DISCLAIMER}</i>"]
+    return _clip("\n".join(lines))
+
+
 def premarket(r: PreMarketReport, cta: bool = False,
               narrative: str | None = None) -> str:
+    monday = date.fromisoformat(r.date).weekday() == 0
+    close_label = "Penutupan Jumat" if monday else "Penutupan terakhir"
     parts = [
         f"🌅 <b>Sahamku — Pre-Market {r.date}</b>",
         "",
         f"Sentimen pembukaan: <b>{r.sentiment_label}</b> (skor {r.sentiment_score:+d})",
+        *([" · ".join(f"{escape(k)}: {escape(v)}" for k, v in r.sentiment_components.items())]
+          if r.sentiment_components else []),
         *_narrative_block(narrative),
         "",
         "🌍 <b>Global semalam</b>",
-        *(f"  {escape(name)}: {num(c, 2)} {pct(p)}" for name, c, p in r.global_rows),
+        *(f"  {escape(name)}: {num(c, 2)} {pct(p)}"
+          + (f" · {escape(r.global_dates[name])}" if name in r.global_dates else "")
+          for name, c, p in r.global_rows),
         "",
         "🇮🇩 <b>IHSG</b>",
-        f"  Close kemarin {num(r.ihsg_close, 2)} {pct(r.ihsg_pct)}",
+        f"  {close_label} {num(r.ihsg_close, 2)} {pct(r.ihsg_pct)}"
+        + (f" · data {r.ihsg_source_date}" if r.ihsg_source_date else ""),
         f"  Support {num(r.support, 0)} · Resistance {num(r.resistance, 0)} (20 hari)",
         *([f"  S/R swing {escape(r.sr_swing)}"] if r.sr_swing else []),
         f"  RSI {num(r.ihsg_rsi, 1)} · {escape(r.ihsg_trend)}",
@@ -295,7 +345,8 @@ def ihsg_snapshot(date: str, close: float, pct_: float | None, volume: float,
                   trend: str, sr: str | None = None) -> str:
     lines = [
         f"🇮🇩 <b>IHSG</b> — {date}",
-        f"Close {num(close, 2)}  {pct(pct_)} · Vol {vol(volume)}",
+        f"Close {num(close, 2)}  {pct(pct_)}"
+        + (f" · Vol {vol(volume)}" if volume and volume > 0 else ""),
         "",
         f"<b>Support</b> {num(support)} · <b>Resistance</b> {num(resistance)} (20 hari)",
         *([f"<b>S/R swing</b> {escape(sr)}"] if sr else []),

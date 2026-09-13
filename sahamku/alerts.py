@@ -33,15 +33,15 @@ class AlertSpec:
         return f"{self.code} {METRICS[self.metric]} {self.op} {v}"
 
 
-def parse(args: str) -> AlertSpec | str:
+def parse(args: str, conn: sqlite3.Connection | None = None) -> AlertSpec | str:
     """Return AlertSpec atau pesan error (str)."""
     m = _RE.match(args or "")
     if not m:
         return ("Format: /alert KODE > HARGA  atau  /alert KODE rsi < 30\n"
                 "Contoh: /alert BBCA > 6500 · /alert TLKM <= 2500 · /alert BBRI rsi < 30")
     code = m.group("code").upper()
-    if not is_known_code(code):
-        return f"{code} tidak ada di universe LQ45."
+    if not is_known_code(code, conn):
+        return f"{code} tidak ada di universe aktif."
     metric = (m.group("metric") or "close").lower()
     raw = m.group("value").replace(".", "").replace(",", ".") if metric == "close" \
         else m.group("value").replace(",", ".")

@@ -11,7 +11,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
 from sahamku import alerts, db, levels, news, screener
-from sahamku.analysis import aftermarket, compare, premarket, sector
+from sahamku.analysis import aftermarket, compare, growth, premarket, sector
 from sahamku.config import settings
 from sahamku.llm import narrative
 from sahamku.llm.ask import ask as llm_ask
@@ -19,7 +19,7 @@ from sahamku.pipeline import load_joined
 from sahamku.report import chart
 from sahamku.report import format as fmt
 from sahamku.signals.rules import RULE_LABELS
-from sahamku.universe import IHSG, STOCKS, is_known_code, to_yf
+from sahamku.universe import IHSG, active_codes, is_known_code, to_yf, universe_label
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -29,6 +29,7 @@ _chart_lock = asyncio.Lock()
 HELP = """<b>Sahamku</b> — daily scan saham IHSG
 
 /scan — laporan after-market terbaru
+/growth — ranking Potential Growth terbaru
 /stock KODE — snapshot + chart (contoh: /stock BBCA)
 /watch KODE — tambah ke watchlist
 /unwatch KODE — hapus dari watchlist
@@ -92,17 +93,28 @@ async def cmd_scan(m: types.Message) -> None:
     await m.answer(fmt.aftermarket(r, narrative=narr))
 
 
+@router.message(Command("growth"))
+async def cmd_growth(m: types.Message) -> None:
+    with db.db() as conn:
+        date_str, rows = growth.latest(conn, limit=20)
+        label = universe_label(conn)
+    if not date_str:
+        await m.answer("Belum ada hasil scan. Jalankan pipeline EOD terlebih dahulu.")
+        return
+    await m.answer(fmt.growth_report(date_str, rows, label))
+
+
 @router.message(Command("stock"))
 async def cmd_stock(m: types.Message, command: CommandObject) -> None:
     code = _code_arg(command)
     if not code:
         await m.answer("Format: /stock KODE (contoh: /stock BBCA)")
         return
-    if not is_known_code(code):
-        await m.answer(f"{code} tidak ada di universe ({len(STOCKS)} saham).")
-        return
     t = to_yf(code)
     with db.db() as conn:
+        if not is_known_code(code, conn):
+            await m.answer(f"{code} tidak ada di universe ({len(active_codes(conn))} saham).")
+            return
         j = load_joined(conn, t)
         if j.empty:
             await m.answer("Data belum tersedia.")
@@ -266,11 +278,11 @@ async def cmd_ihsg(m: types.Message) -> None:
 @router.message(Command("news"))
 async def cmd_news(m: types.Message, command: CommandObject) -> None:
     code = _code_arg(command)
-    if code and not is_known_code(code):
-        await m.answer(f"{code} tidak ada di universe LQ45.")
-        return
     hours = 72 if code else 24
     with db.db() as conn:
+        if code and not is_known_code(code, conn):
+            await m.answer(f"{code} tidak ada di universe aktif.")
+            return
         items = news.headlines(conn, hours=hours, code=code, limit=10)
     await m.answer(fmt.news_list(code, items, hours))
 
@@ -294,7 +306,8 @@ async def cmd_screener(m: types.Message, command: CommandObject) -> None:
 
 @router.message(Command("alert"))
 async def cmd_alert(m: types.Message, command: CommandObject) -> None:
-    spec = alerts.parse(command.args or "")
+    with db.db() as conn:
+        spec = alerts.parse(command.args or "", conn)
     if isinstance(spec, str):
         await m.answer(spec)
         return
@@ -341,10 +354,10 @@ async def cmd_unalert(m: types.Message, command: CommandObject) -> None:
 @router.message(Command("watch"))
 async def cmd_watch(m: types.Message, command: CommandObject) -> None:
     code = _code_arg(command)
-    if not code or not is_known_code(code):
-        await m.answer("Format: /watch KODE (kode LQ45)")
-        return
     with db.db() as conn:
+        if not code or not is_known_code(code, conn):
+            await m.answer("Format: /watch KODE (kode dari universe aktif)")
+            return
         db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
         lim = _limits(conn, m.chat.id)
         if code not in db.watch_list(conn, m.chat.id) and \
@@ -442,7 +455,8 @@ def _limits(conn, chat_id: int) -> dict[str, int]:
 @router.message(Command("compare"))
 async def cmd_compare(m: types.Message, command: CommandObject) -> None:
     codes = [c.upper() for c in (command.args or "").split()][:compare.MAX_CODES]
-    bad = [c for c in codes if not is_known_code(c)]
+    with db.db() as conn:
+        bad = [c for c in codes if not is_known_code(c, conn)]
     if len(codes) < 2 or bad:
         await m.answer("Format: /compare KODE1 KODE2 [KODE3 KODE4] (2–4 saham dari universe)"
                        + (f"\nTidak dikenal: {', '.join(bad)}" if bad else ""))

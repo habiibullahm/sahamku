@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 
 from sahamku import db, levels, news
 from sahamku.indicators.technical import compute
-from sahamku.universe import GLOBAL_TICKERS, IHSG, from_yf, to_yf
+from sahamku.universe import GLOBAL_TICKERS, IHSG, from_yf, is_trading_day, scan_tickers, to_yf
 
 
 @dataclass
@@ -32,6 +32,10 @@ class PreMarketReport:
     watchlist: dict[str, str] = field(default_factory=dict)
     headlines: list[news.Headline] = field(default_factory=list)
     news_sentiment: dict[str, tuple[int, int]] = field(default_factory=dict)
+    ihsg_source_date: str = ""
+    global_dates: dict[str, str] = field(default_factory=dict)
+    stale_groups: list[str] = field(default_factory=list)
+    sentiment_components: dict[str, str] = field(default_factory=dict)
 
 
 # Kontribusi ke sentimen IHSG: +1 jika naik searah, -1 jika berlawanan (USD/IDR & yield inverse)
@@ -58,16 +62,23 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
 
     # Global rows + skor
     rows: list[tuple[str, float | None, float | None]] = []
+    global_dates: dict[str, str] = {}
+    fresh: dict[str, bool] = {}
     score = 0
     notes: list[str] = []
     for t, name in GLOBAL_TICKERS.items():
         g = db.load_ohlcv(conn, t, limit=2, table="global_ohlcv")
         if len(g) < 2:
             rows.append((name, None, None))
+            fresh[t] = False
             continue
         c1, c0 = float(g["close"].iloc[-1]), float(g["close"].iloc[-2])
         p = (c1 / c0 - 1) * 100 if c0 else None
         rows.append((name, c1, p))
+        observed = g.index[-1].date()
+        global_dates[name] = observed.isoformat()
+        expected = for_date if t == "ES=F" else _previous_weekday(for_date)
+        fresh[t] = observed == expected
         w = SENTIMENT_WEIGHT.get(t, 0)
         if p is not None and abs(p) >= MOVE_THRESHOLD and w:
             score += w * (1 if p > 0 else -1)
@@ -80,7 +91,20 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
         if t == "IDR=X" and p is not None and p >= 0.5:
             notes.append(f"Rupiah melemah {p:.2f}% → tekanan pada saham berbasis impor/USD debt")
 
-    label = "BULLISH" if score >= 3 else "BEARISH" if score <= -3 else "NETRAL"
+    expected_idx = _previous_idx_day(for_date)
+    stale_groups = []
+    if yday != expected_idx.isoformat():
+        stale_groups.append("IHSG")
+    if sum(fresh.get(t, False) for t in ("^DJI", "^GSPC", "^IXIC")) < 2:
+        stale_groups.append("saham AS")
+    if not fresh.get("IDR=X", False):
+        stale_groups.append("USD/IDR")
+    if not fresh.get("^TNX", False):
+        stale_groups.append("UST10Y")
+    label = ("MENUNGGU DATA TERBARU" if stale_groups else
+             "BULLISH" if score >= 3 else "BEARISH" if score <= -3 else "NETRAL")
+    if stale_groups:
+        notes.append("Data belum fresh: " + ", ".join(stale_groups))
 
     # Level IHSG: support/resistance dari swing 20 hari + trend vs SMA
     support = float(joined["low"].tail(20).min())
@@ -89,7 +113,10 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
 
     # Sinyal dari scan kemarin
     bull, bear = [], []
+    allowed = set(scan_tickers(conn, yday))
     for r in db.ratings_on(conn, yday):
+        if r["ticker"] not in allowed:
+            continue
         if r["rating"] == "bullish":
             bull.append(from_yf(r["ticker"]))
         elif r["rating"] == "bearish":
@@ -109,7 +136,47 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
         notes=notes, bullish_yesterday=bull[:10], bearish_yesterday=bear[:10], watchlist=watch,
         headlines=news.headlines(conn, hours=20, limit=6),
         news_sentiment=news.ticker_sentiment(conn, hours=20),
+        ihsg_source_date=yday, global_dates=global_dates, stale_groups=stale_groups,
+        sentiment_components={
+            "global": _component(score, 3),
+            "rupiah": _move_component(rows, "USD/IDR", inverse=True),
+            "komoditas": _commodity_component(rows),
+            "domestik": trend,
+        },
     )
+
+
+def _previous_weekday(d: date) -> date:
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _previous_idx_day(d: date) -> date:
+    d -= timedelta(days=1)
+    while not is_trading_day(d):
+        d -= timedelta(days=1)
+    return d
+
+
+def _component(score: int, threshold: int) -> str:
+    return "positif" if score >= threshold else "negatif" if score <= -threshold else "netral"
+
+
+def _move_component(rows, name: str, inverse: bool = False) -> str:
+    p = next((p for n, _, p in rows if n == name), None)
+    if p is None or abs(p) < MOVE_THRESHOLD:
+        return "netral"
+    positive = p < 0 if inverse else p > 0
+    return "mendukung" if positive else "menekan"
+
+
+def _commodity_component(rows) -> str:
+    values = [p for n, _, p in rows if n in ("Minyak WTI", "Emas") and p is not None]
+    if len(values) == 2 and values[0] * values[1] < 0:
+        return "campuran"
+    return "menguat" if values and sum(values) > 0 else "melemah"
 
 
 def trend_label(row: pd.Series) -> str:

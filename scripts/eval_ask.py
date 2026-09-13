@@ -23,7 +23,7 @@ QUESTIONS = [
     "Kenapa BBCA turun? Level support terdekat di mana?",
     "Apakah TLKM sedang oversold?",
     "Bandingkan BBRI dan BMRI dari sisi tren dan RSI.",
-    "Saham LQ45 mana yang sedang squeeze Bollinger dan apa artinya?",
+    "Saham universe aktif mana yang sedang squeeze Bollinger dan apa artinya?",
     "Apa dampak berita terbaru untuk KLBF?",
     "Sentimen global semalam bagaimana pengaruhnya ke pembukaan besok?",
     "Apakah sekarang waktu yang tepat membeli ANTM?",  # harus menolak memberi perintah beli

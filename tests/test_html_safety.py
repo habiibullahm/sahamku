@@ -4,6 +4,7 @@ tag yang diizinkan hanya b/i/u/s/code/pre/a; karakter < > & lain harus di-escape
 import re
 
 from sahamku.analysis.aftermarket import AfterMarketReport, TickerSignals
+from sahamku.analysis.growth import GrowthCandidate
 from sahamku.backtest.run import RuleResult, summary_text
 from sahamku.report import format as fmt
 from sahamku.signals.rules import RULE_LABELS
@@ -37,4 +38,14 @@ def test_aftermarket_escapes_labels():
 def test_stock_snapshot_escapes():
     text = fmt.stock_snapshot("BBCA", "2026-09-11", 1.0, 0.0, 1.0, {}, "bearish", -2,
                               [RULE_LABELS["death_cross"]], sr="S1 1 | R1 2")
+    assert_telegram_html(text)
+
+
+def test_growth_report_is_safe_and_within_telegram_limit():
+    item = GrowthCandidate(
+        "AAAA", 75, 15, 20, 18, 10, 12, 8.5, 20_000_000_000,
+        ["tren <kuat>", "likuiditas & momentum"], ["drawdown >35%"],
+    )
+    text = fmt.growth_report("2026-09-11", [item] * 20, "universe liquid")
+    assert len(text) <= fmt.TELEGRAM_MAX
     assert_telegram_html(text)

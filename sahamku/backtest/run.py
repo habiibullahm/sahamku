@@ -16,7 +16,7 @@ import pandas as pd
 from sahamku import db
 from sahamku.indicators.technical import compute
 from sahamku.signals.rules import RULE_DIRECTION, RULE_LABELS, evaluate_all
-from sahamku.universe import STOCK_TICKERS
+from sahamku.universe import active_tickers
 
 log = logging.getLogger(__name__)
 HORIZONS = (5, 10, 20)
@@ -37,7 +37,7 @@ def run_backtest(conn: sqlite3.Connection, tickers: list[str] | None = None,
     cutoff = pd.Timestamp.today().normalize() - pd.DateOffset(years=years)
     events: dict[str, list[pd.Series]] = {r: [] for r in RULE_DIRECTION}
 
-    for t in tickers or STOCK_TICKERS:
+    for t in tickers or active_tickers(conn):
         ohlcv = db.load_ohlcv(conn, t)
         if len(ohlcv) < 250:
             continue
@@ -70,8 +70,8 @@ def run_backtest(conn: sqlite3.Connection, tickers: list[str] | None = None,
     return results
 
 
-def summary_text(results: list[RuleResult]) -> str:
-    lines = ["🧪 <b>Backtest rule (LQ45, 3 tahun)</b>",
+def summary_text(results: list[RuleResult], universe: str = "universe aktif") -> str:
+    lines = [f"🧪 <b>Backtest rule ({escape(universe)}, 3 tahun)</b>",
              "rule · n · win% (5/10/20D) · avg ret% (10D)"]
     for r in results:
         lines.append(

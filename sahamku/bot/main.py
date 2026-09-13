@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 COMMANDS = [
     BotCommand(command="scan", description="Laporan after-market terbaru"),
+    BotCommand(command="growth", description="Ranking Potential Growth terbaru"),
     BotCommand(command="stock", description="Snapshot + chart, contoh: /stock BBCA"),
     BotCommand(command="watch", description="Tambah ke watchlist"),
     BotCommand(command="unwatch", description="Hapus dari watchlist"),

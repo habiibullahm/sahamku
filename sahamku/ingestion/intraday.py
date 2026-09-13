@@ -11,7 +11,7 @@ import pandas as pd
 from sahamku import db
 from sahamku.config import TZ
 from sahamku.ingestion.eod import fetch_history
-from sahamku.universe import ALL_EOD_TICKERS
+from sahamku.universe import IHSG, scan_tickers
 
 log = logging.getLogger(__name__)
 
@@ -26,20 +26,24 @@ def in_session(now: datetime | None = None) -> bool:
 
 def snapshot(conn: sqlite3.Connection, tickers: list[str] | None = None) -> int:
     """Ambil bar hari ini (parsial) dan simpan ke tabel intraday. Return jumlah ticker."""
-    tickers = tickers or ALL_EOD_TICKERS
+    tickers = tickers or [
+        IHSG, *scan_tickers(conn, db.latest_date(conn, ticker=IHSG))
+    ]
     today = datetime.now(TZ).date()
-    data = fetch_history(tickers, period="5d")
     ts = datetime.now(TZ).isoformat(timespec="minutes")
     n = 0
-    for t, df in data.items():
-        last_idx = df.index[-1]
-        if pd.Timestamp(last_idx).date() != today:
-            continue  # belum ada bar hari ini (pre-open / libur)
-        r = df.iloc[-1]
-        prev = float(df["close"].iloc[-2]) if len(df) > 1 else None
-        db.intraday_upsert(conn, t, today.isoformat(), ts, float(r["open"]), float(r["high"]),
-                           float(r["low"]), float(r["close"]), float(r["volume"]), prev)
-        n += 1
+    for i in range(0, len(tickers), 50):
+        data = fetch_history(tickers[i:i + 50], period="5d")
+        for t, df in data.items():
+            last_idx = df.index[-1]
+            if pd.Timestamp(last_idx).date() != today:
+                continue  # belum ada bar hari ini (pre-open / libur)
+            r = df.iloc[-1]
+            prev = float(df["close"].iloc[-2]) if len(df) > 1 else None
+            db.intraday_upsert(conn, t, today.isoformat(), ts, float(r["open"]),
+                               float(r["high"]), float(r["low"]), float(r["close"]),
+                               float(r["volume"]), prev)
+            n += 1
     conn.commit()
     log.info("intraday snapshot: %d/%d ticker", n, len(tickers))
     return n

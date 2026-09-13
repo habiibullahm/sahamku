@@ -8,7 +8,7 @@ from datetime import date, timedelta
 
 from sahamku import db
 from sahamku.analysis.aftermarket import Mover
-from sahamku.universe import IHSG, STOCK_TICKERS, from_yf
+from sahamku.universe import IHSG, from_yf, scan_tickers
 
 
 @dataclass
@@ -74,7 +74,7 @@ def build(conn: sqlite3.Connection, ref: date | None = None, top_n: int = 5
     wk = ihsg_df.loc[first:last] if not ihsg_df.empty else ihsg_df
 
     movers: list[Mover] = []
-    for t in STOCK_TICKERS:
+    for t in scan_tickers(conn, last):
         c0, c1 = db.close_at(conn, t, base), db.close_at(conn, t, last)
         if c0 and c1:
             movers.append(Mover(from_yf(t), c1, (c1 / c0 - 1) * 100, 0.0))

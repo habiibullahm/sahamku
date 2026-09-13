@@ -11,7 +11,7 @@ from sahamku import db
 from sahamku.indicators.technical import compute
 from sahamku.signals.rules import evaluate_latest
 from sahamku.signals.scoring import score_and_rate
-from sahamku.universe import ALL_EOD_TICKERS, STOCK_TICKERS
+from sahamku.universe import active_tickers, all_eod_tickers
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ def ensure_history(conn: sqlite3.Connection, min_bars: int = 250) -> list[str]:
     from sahamku.ingestion.eod import backfill
 
     missing = []
-    for t in ALL_EOD_TICKERS:
+    for t in all_eod_tickers(conn):
         n = conn.execute("SELECT COUNT(*) FROM ohlcv WHERE ticker=?", (t,)).fetchone()[0]
         if n < min_bars:
             missing.append(t)
@@ -58,11 +58,14 @@ def ensure_history(conn: sqlite3.Connection, min_bars: int = 250) -> list[str]:
 
 def recompute_all(conn: sqlite3.Connection, tickers: list[str] | None = None) -> int:
     n = 0
-    for t in tickers or STOCK_TICKERS:
+    for t in tickers or active_tickers(conn):
         try:
             process_ticker(conn, t)
             n += 1
         except Exception:
             log.exception("gagal proses %s", t)
     conn.commit()
+    if tickers is None:
+        from sahamku.analysis.growth import compute_and_store
+        compute_and_store(conn)
     return n

@@ -12,11 +12,11 @@ from sahamku.config import DISCLAIMER
 from sahamku.llm.providers import generate
 from sahamku.pipeline import load_joined
 from sahamku.signals.rules import RULE_LABELS
-from sahamku.universe import STOCKS, to_yf
+from sahamku.universe import active_codes, to_yf
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Kamu adalah Sahamku, asisten analisis teknikal saham Indonesia (IHSG/LQ45).
+SYSTEM_PROMPT = """Kamu adalah Sahamku, asisten analisis teknikal saham Indonesia (IHSG/IDX).
 Jawab dalam Bahasa Indonesia, ringkas (maks ~200 kata), berbasis data yang diberikan.
 Gunakan format teks biasa (tanpa markdown heading), boleh bullet sederhana dengan "•".
 Gunakan HANYA angka yang ada di data; jangan mengarang angka atau berita.
@@ -30,11 +30,13 @@ Akhiri jawaban dengan satu baris disclaimer singkat: "Bukan saran investasi."
 _CODE_RE = re.compile(r"(?<![A-Za-z])(?:\$([A-Za-z]{4})|([A-Z]{4}))(?![A-Za-z])")
 
 
-def detect_codes(text: str, max_codes: int = 3) -> list[str]:
+def detect_codes(text: str, max_codes: int = 3,
+                 conn: sqlite3.Connection | None = None) -> list[str]:
     found: list[str] = []
+    known = set(active_codes(conn))
     for m in _CODE_RE.finditer(text):
         c = (m.group(1) or m.group(2)).upper()
-        if c in STOCKS and c not in found:
+        if c in known and c not in found:
             found.append(c)
     return found[:max_codes]
 
@@ -93,12 +95,12 @@ def build_context(conn: sqlite3.Connection, codes: list[str]) -> str:
 
 
 async def ask(conn: sqlite3.Connection, question: str, chat_id: int | None = None) -> str:
-    codes = detect_codes(question)
+    codes = detect_codes(question, conn=conn)
     # pertanyaan lanjutan tanpa kode: pakai kode dari giliran sebelumnya
     history = db.ask_history_recent(conn, chat_id) if chat_id else []
     if not codes and history:
         for _, t in reversed(history):
-            if codes := detect_codes(t):
+            if codes := detect_codes(t, conn=conn):
                 break
     context = build_context(conn, codes)
     user_msg = f"Data terkini:\n{context}\n\nPertanyaan pengguna: {question}"

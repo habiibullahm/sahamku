@@ -305,8 +305,10 @@ async def job_weekly_backtest(bot: Bot) -> None:
     async def run():
         with db.db() as conn:
             res = await asyncio.to_thread(run_backtest, conn)
+            from sahamku.universe import universe_label
+            label = universe_label(conn)
         if settings.admin_chat_id:
-            await bot.send_message(settings.admin_chat_id, summary_text(res))
+            await bot.send_message(settings.admin_chat_id, summary_text(res, label))
         return f"{len(res)} rules"
 
     await _run_logged("weekly_backtest", run, bot)

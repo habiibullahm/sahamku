@@ -127,6 +127,25 @@ CREATE TABLE IF NOT EXISTS job_runs (
     status TEXT NOT NULL,
     detail TEXT
 );
+CREATE TABLE IF NOT EXISTS securities (
+    code TEXT PRIMARY KEY, name TEXT NOT NULL, sector TEXT NOT NULL, board TEXT NOT NULL,
+    instrument_type TEXT NOT NULL, status TEXT NOT NULL, source_date TEXT NOT NULL,
+    imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS universe_eligibility (
+    date TEXT NOT NULL, ticker TEXT NOT NULL, eligible INTEGER NOT NULL,
+    history_bars INTEGER NOT NULL, traded_20 INTEGER NOT NULL, traded_60 INTEGER NOT NULL,
+    median_value_20 REAL, median_value_60 REAL, exclusion_reason TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (date, ticker)
+);
+CREATE TABLE IF NOT EXISTS growth_scores (
+    date TEXT NOT NULL, ticker TEXT NOT NULL, total REAL NOT NULL, liquidity REAL NOT NULL,
+    momentum REAL NOT NULL, trend REAL NOT NULL, breakout REAL NOT NULL,
+    accumulation_risk REAL NOT NULL, rel_20 REAL, rel_60 REAL, rel_120 REAL,
+    median_value_20 REAL, explanations TEXT NOT NULL DEFAULT '[]',
+    risk_flags TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (date, ticker)
+);
+CREATE INDEX IF NOT EXISTS idx_growth_date_total ON growth_scores(date, total DESC);
 """
 
 INDICATOR_COLS = [
@@ -230,6 +249,39 @@ def close_on(conn: sqlite3.Connection, date_str: str, table: str = "ohlcv") -> p
     FROM {table} t WHERE t.date=?
     """
     return pd.read_sql_query(q, conn, params=(date_str,), index_col="ticker")
+
+
+def replace_eligibility(conn: sqlite3.Connection, date_str: str, rows: list[tuple]) -> None:
+    conn.execute("DELETE FROM universe_eligibility WHERE date=?", (date_str,))
+    conn.executemany(
+        "INSERT INTO universe_eligibility (date,ticker,eligible,history_bars,traded_20,"
+        "traded_60,median_value_20,median_value_60,exclusion_reason) VALUES (?,?,?,?,?,?,?,?,?)",
+        [(date_str, *r) for r in rows],
+    )
+
+
+def eligible_tickers(conn: sqlite3.Connection, date_str: str) -> list[str]:
+    return [r["ticker"] for r in conn.execute(
+        "SELECT ticker FROM universe_eligibility WHERE date=? AND eligible=1 ORDER BY ticker",
+        (date_str,),
+    )]
+
+
+def replace_growth_scores(conn: sqlite3.Connection, date_str: str, rows: list[tuple]) -> None:
+    conn.execute("DELETE FROM growth_scores WHERE date=?", (date_str,))
+    conn.executemany(
+        "INSERT INTO growth_scores (date,ticker,total,liquidity,momentum,trend,breakout,"
+        "accumulation_risk,rel_20,rel_60,rel_120,median_value_20,explanations,risk_flags) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [(date_str, *r) for r in rows],
+    )
+
+
+def growth_rows(conn: sqlite3.Connection, date_str: str, limit: int = 20,
+                min_score: float = 0) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM growth_scores WHERE date=? AND total>=? ORDER BY total DESC, ticker LIMIT ?",
+        (date_str, min_score, limit),
+    ).fetchall()
 
 
 # ---------- indicators / signals / ratings ----------

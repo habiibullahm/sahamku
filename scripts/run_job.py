@@ -1,7 +1,7 @@
 """Jalankan satu job secara manual (tanpa Telegram, output ke stdout).
 
 Usage: python scripts/run_job.py JOB [KODE]
-JOB: eod|global|compute|news|premarket|intraday|aftermarket|weekly|chart
+JOB: eod|global|compute|growth|news|premarket|intraday|aftermarket|weekly|chart
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sahamku import db  # noqa: E402
-from sahamku.analysis import aftermarket, midday, premarket, weekly  # noqa: E402
+from sahamku.analysis import aftermarket, growth, midday, premarket, weekly  # noqa: E402
 from sahamku.ingestion.eod import ingest, validate_eod  # noqa: E402
 from sahamku.ingestion.global_ import ingest_global  # noqa: E402
 from sahamku.ingestion.intraday import snapshot as intraday_snapshot  # noqa: E402
@@ -44,6 +44,11 @@ def main() -> None:
                 print(ingest_global(conn))
             case "compute":
                 print("computed", recompute_all(conn))
+            case "growth":
+                n = growth.compute_and_store(conn)
+                day, rows = growth.latest(conn)
+                print(_strip(fmt.growth_report(day, rows, "universe aktif")))
+                print(f"computed {n}")
             case "aftermarket":
                 r = aftermarket.build(conn, watch_codes=["BBCA", "TLKM"])
                 print(_strip(fmt.aftermarket(r)) if r else "no data")

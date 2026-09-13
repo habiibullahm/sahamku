@@ -10,12 +10,12 @@ import pandas as pd
 
 from sahamku import db
 from sahamku.pipeline import load_joined
-from sahamku.universe import STOCK_TICKERS, from_yf
+from sahamku.universe import from_yf, scan_tickers, universe_label
 
 MAX_ROWS = 20
 
 # nama filter → deskripsi (dipakai di /screener tanpa argumen)
-HELP = """<b>/screener</b> — filter saham LQ45 (data close terakhir)
+HELP = """<b>/screener</b> — filter universe aktif (data close terakhir)
 
 Contoh:
   /screener rating=bullish
@@ -85,10 +85,11 @@ def snapshot(conn: sqlite3.Connection) -> pd.DataFrame:
     date_str = db.latest_date(conn)
     if not date_str:
         return pd.DataFrame()
-    if date_str in _cache:
-        return _cache[date_str]
+    cache_key = f"{date_str}:{universe_label(conn)}"
+    if cache_key in _cache:
+        return _cache[cache_key]
     rows = []
-    for t in STOCK_TICKERS:
+    for t in scan_tickers(conn, date_str):
         j = load_joined(conn, t, limit=2)
         if j.empty or j.index[-1].strftime("%Y-%m-%d") != date_str:
             continue
@@ -109,7 +110,7 @@ def snapshot(conn: sqlite3.Connection) -> pd.DataFrame:
         })
     df = pd.DataFrame(rows)
     _cache.clear()
-    _cache[date_str] = df
+    _cache[cache_key] = df
     return df
 
 

@@ -13,7 +13,7 @@ import feedparser
 
 from sahamku import db
 from sahamku.config import TZ
-from sahamku.universe import NAME_ALIASES, STOCKS
+from sahamku.universe import NAME_ALIASES, active_codes
 
 log = logging.getLogger(__name__)
 
@@ -43,12 +43,13 @@ def _published(e) -> str:
     return datetime.now(TZ).isoformat(timespec="minutes")
 
 
-def rule_tickers(text: str) -> list[str]:
+def rule_tickers(text: str, conn: sqlite3.Connection | None = None) -> list[str]:
     """Deteksi ticker cepat tanpa LLM: kode kapital atau alias nama perusahaan."""
     found: list[str] = []
+    known = set(active_codes(conn))
     for m in _CODE.finditer(text):
         c = m.group(1)
-        if c in STOCKS and c not in found:
+        if c in known and c not in found:
             found.append(c)
     low = text.lower()
     for code, aliases in NAME_ALIASES.items():
@@ -56,6 +57,14 @@ def rule_tickers(text: str) -> list[str]:
             continue
         if any(re.search(rf"\b{re.escape(a.lower())}\b", low) for a in aliases):
             found.append(code)
+    if conn is not None and len(found) < 4:
+        for r in conn.execute(
+            "SELECT code,name FROM securities WHERE lower(status)='active' ORDER BY code"
+        ):
+            if r["code"] not in found and r["name"].lower() in low:
+                found.append(r["code"])
+                if len(found) == 4:
+                    break
     return found[:4]
 
 
@@ -88,7 +97,7 @@ def ingest(conn: sqlite3.Connection) -> int:
     """Simpan item baru. Return jumlah baris baru."""
     new = 0
     for it in fetch_all():
-        tick = rule_tickers(f"{it['title']} {it['summary']}")
+        tick = rule_tickers(f"{it['title']} {it['summary']}", conn)
         if db.news_insert(conn, it, ",".join(tick)):
             new += 1
     conn.commit()
