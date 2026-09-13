@@ -41,28 +41,15 @@ docker compose down              # hentikan
 
 ## Deploy ke VPS (Ubuntu 22.04/24.04)
 
+Untuk setup awal, ikuti [runbook VPS](docs/VPS.md). Setelah alias SSH `sahamku-vps`
+tersedia dan `/opt/sahamku/.env` sudah diisi, deploy setiap commit dengan:
+
 ```bash
-ssh root@IP_VPS
-curl -fsSL https://raw.githubusercontent.com/habiibullahm/sahamku/main/scripts/vps_setup.sh -o setup.sh
-bash setup.sh          # update, user deploy, ufw, fail2ban, swap, Docker, clone ke /opt/sahamku
-nano /opt/sahamku/.env # isi token & key
-cd /opt/sahamku && docker compose up -d --build
+bash scripts/deploy.sh
 ```
 
-Update kode di VPS (repo private): `bash scripts/deploy.sh`. Runbook lengkap: [docs/VPS.md](docs/VPS.md).
-Bawa DB dari laptop (opsional): `scp data/sahamku.db deploy@IP_VPS:/opt/sahamku/data/` sebelum `up`.
-
-## Deploy ke Railway
-
-1. New Project → Deploy from GitHub repo → pilih repo ini (Dockerfile & `railway.json` terdeteksi).
-2. Variables: `TELEGRAM_BOT_TOKEN`, `ADMIN_CHAT_ID`, `LLM_PROVIDER=groq`, `GROQ_API_KEY`,
-   `GROQ_MODEL=openai/gpt-oss-120b`, `DB_PATH=/data/sahamku.db`, `CHARTS_DIR=/data/charts`,
-   `TZ=Asia/Jakarta`.
-3. Settings → Volumes → Add Volume, mount path **`/data`** (wajib, agar DB bertahan antar deploy).
-4. Tidak perlu public domain/port (worker, bukan web). `numReplicas` harus 1 — Telegram hanya
-   mengizinkan satu long-polling per bot.
-5. Deploy pertama menjalankan backfill 3 tahun otomatis (±1–2 menit), lalu bot polling.
-6. Matikan instance lain (`docker compose down` di laptop) agar tidak konflik `getUpdates`.
+Skrip mengirim snapshot commit saat ini ke `/opt/sahamku`, membangun image Docker, dan mengganti
+container. VPS tidak membutuhkan akses GitHub. Untuk verifikasi: `ssh sahamku-vps "cd /opt/sahamku && sudo docker compose ps"`.
 
 ## Command
 
