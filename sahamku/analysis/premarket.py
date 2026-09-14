@@ -82,13 +82,13 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
         w = SENTIMENT_WEIGHT.get(t, 0)
         if p is not None and abs(p) >= MOVE_THRESHOLD and w:
             score += w * (1 if p > 0 else -1)
-        if t == "CL=F" and p is not None and abs(p) >= 2:
+        if fresh[t] and t == "CL=F" and p is not None and abs(p) >= 2:
             notes.append(f"Minyak {'naik' if p > 0 else 'turun'} {abs(p):.1f}% → "
                          "perhatikan sektor energi (MEDC, PGAS, AKRA)")
-        if t == "GC=F" and p is not None and abs(p) >= 1.5:
+        if fresh[t] and t == "GC=F" and p is not None and abs(p) >= 1.5:
             notes.append(f"Emas {'naik' if p > 0 else 'turun'} {abs(p):.1f}% → "
                          "perhatikan ANTM, MDKA")
-        if t == "IDR=X" and p is not None and p >= 0.5:
+        if fresh[t] and t == "IDR=X" and p is not None and p >= 0.5:
             notes.append(f"Rupiah melemah {p:.2f}% → tekanan pada saham berbasis impor/USD debt")
 
     expected_idx = _previous_idx_day(for_date)
@@ -138,8 +138,10 @@ def build(conn: sqlite3.Connection, for_date: date | None = None,
         news_sentiment=news.ticker_sentiment(conn, hours=20),
         ihsg_source_date=yday, global_dates=global_dates, stale_groups=stale_groups,
         sentiment_components={
-            "global": _component(score, 3),
-            "rupiah": _move_component(rows, "USD/IDR", inverse=True),
+            "global": ("menunggu data terbaru" if "saham AS" in stale_groups
+                       else _component(score, 3)),
+            "rupiah": ("menunggu data terbaru" if "USD/IDR" in stale_groups
+                        else _move_component(rows, "USD/IDR", inverse=True)),
             "komoditas": _commodity_component(rows),
             "domestik": trend,
         },

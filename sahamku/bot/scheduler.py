@@ -185,8 +185,12 @@ async def job_premarket(bot: Bot) -> None:
             if settings.admin_chat_id:
                 ids.add(settings.admin_chat_id)
             base = premarket.build(conn, for_date=_today())
-            narr = await narrative.get_or_create(
-                conn, "premarket", base.date, fmt.premarket(base)) if base else None
+            # Narasi arah pasar hanya boleh dibuat bila seluruh input wajib fresh.
+            # Data stale tetap dilaporkan oleh formatter dengan status menunggu.
+            narr = (
+                await narrative.get_or_create(conn, "premarket", base.date, fmt.premarket(base))
+                if base and not base.stale_groups else None
+            )
             sent = 0
             for cid in ids:
                 watch = db.watch_list(conn, cid)

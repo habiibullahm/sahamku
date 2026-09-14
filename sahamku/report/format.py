@@ -271,15 +271,19 @@ def premarket(r: PreMarketReport, cta: bool = False,
               narrative: str | None = None) -> str:
     monday = date.fromisoformat(r.date).weekday() == 0
     close_label = "Penutupan Jumat" if monday else "Penutupan terakhir"
+    score_label = f"skor {r.sentiment_score:+d}"
+    if r.stale_groups:
+        score_label = f"skor indikatif {r.sentiment_score:+d}"
+    global_heading = "Global semalam" if not r.stale_groups else "Global (observasi terakhir)"
     parts = [
         f"🌅 <b>Sahamku — Pre-Market {r.date}</b>",
         "",
-        f"Sentimen pembukaan: <b>{r.sentiment_label}</b> (skor {r.sentiment_score:+d})",
+        f"Sentimen pembukaan: <b>{r.sentiment_label}</b> ({score_label})",
         *([" · ".join(f"{escape(k)}: {escape(v)}" for k, v in r.sentiment_components.items())]
           if r.sentiment_components else []),
         *_narrative_block(narrative),
         "",
-        "🌍 <b>Global semalam</b>",
+        f"🌍 <b>{global_heading}</b>",
         *(f"  {escape(name)}: {num(c, 2)} {pct(p)}"
           + (f" · {escape(r.global_dates[name])}" if name in r.global_dates else "")
           for name, c, p in r.global_rows),
