@@ -31,9 +31,11 @@ def in_session(now: datetime | None = None) -> bool:
 def snapshot(conn: sqlite3.Connection, tickers: list[str] | None = None,
              now: datetime | None = None) -> int:
     """Ambil bar hari ini (parsial) dan simpan ke tabel intraday. Return jumlah ticker."""
-    tickers = tickers or [
-        IHSG, *scan_tickers(conn, db.latest_date(conn, ticker=IHSG))
-    ]
+    if tickers is None:
+        plan_tickers = [row["ticker"] for row in db.trade_plans_active(conn)]
+        tickers = list(dict.fromkeys([
+            IHSG, *scan_tickers(conn, db.latest_date(conn, ticker=IHSG)), *plan_tickers,
+        ]))
     now = now or datetime.now(TZ)
     today = now.date()
     ts = now.isoformat(timespec="minutes")

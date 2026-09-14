@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from html import escape
 
@@ -389,6 +390,101 @@ def alert_triggered(code: str, label: str, actual: float, metric: str, date: str
     val = f"{actual:,.0f}" if metric == "close" else f"{actual:.1f}"
     return (f"🔔 <b>Alert {code}</b> ({date})\n{escape(label)} — sekarang <b>{val}</b>\n"
             f"Lihat detail: /stock {code}")
+
+
+def risk_profile(capital: float, risk_pct: float, total_limit: float) -> str:
+    amount = capital * risk_pct / 100
+    return (
+        "🛡 <b>Profil risiko</b>\n"
+        f"Modal <b>Rp{capital:,.0f}</b>\n"
+        f"Risiko per trade <b>{risk_pct:g}%</b> (Rp{amount:,.0f})\n"
+        f"Batas total risiko plan terkonfirmasi <b>{total_limit:g}%</b>\n\n"
+        "Ubah: <code>/risk MODAL PERSEN</code> · hapus: <code>/risk clear</code>"
+    )
+
+
+def trade_plan_report(plan) -> str:
+    status = {
+        "WAITING": "🟡 MENUNGGU", "ATTENTION": "🟠 PERHATIAN",
+        "CONFIRMED": "🟢 TERKONFIRMASI", "TARGET": "✅ TARGET",
+        "STOP": "🔴 STOP", "EXPIRED": "⚪ KEDALUWARSA",
+        "CANCELLED": "⚪ DIBATALKAN", "RISK_BLOCKED": "🔴 DITOLAK RISIKO",
+    }.get(plan["status"], escape(plan["status"]))
+    code = escape(plan["ticker"].removesuffix(".JK"))
+    actual_risk = int(plan["lots"]) * 100 * (float(plan["entry"]) - float(plan["stop"]))
+    rsi_note = " · momentum lemah" if plan["rsi14"] < 50 else (
+        " · risiko terlalu panas" if plan["rsi14"] > 80 else ""
+    )
+    lines = [
+        f"📋 <b>Trade Plan #{plan['id']} — {code}</b>",
+        f"Grade <b>{escape(plan['grade'])}</b> · {status}",
+        f"Snapshot EOD {escape(plan['snapshot_date'])} · Growth {plan['growth_score']:.1f}/100",
+        "", "<b>Rencana risiko</b>",
+        f"  Trigger {num(plan['entry'])} · Stop {num(plan['stop'])} · Target {num(plan['target'])}",
+        f"  {plan['lots']} lot · posisi Rp{plan['position_value']:,.0f}",
+        f"  Risiko aktual Rp{actual_risk:,.0f} ({plan['risk_pct']:g}% budget) · R/R 1:2",
+        "", "<b>Penjelasan TA</b>",
+        f"  • Trend: close {num(plan['close'])} &gt; SMA50 {num(plan['sma50'])} "
+        f"&gt; SMA200 {num(plan['sma200'])}; slope SMA50 {pct(plan['sma50_slope_pct'])}",
+        f"  • Relative strength: 20D {pct(plan['rel20'])} · 60D {pct(plan['rel60'])} vs IHSG",
+        f"  • Breakout: high 20D sebelumnya {num(plan['prior_high'])}; "
+        f"trigger +{settings.trade_plan_breakout_buffer_pct:g}%",
+        f"  • Volume EOD: {plan['volume_ratio']:.2f}× rata-rata 20D sebelumnya",
+        f"  • RSI14 {plan['rsi14']:.1f}{rsi_note} · ATR14 {num(plan['atr14'])}",
+        f"  • Support swing {num(plan['swing_support'])}",
+        "", "<b>Catalyst Check</b>",
+    ]
+    if plan["catalyst_title"]:
+        title = escape(plan["catalyst_title"])
+        if plan["catalyst_link"]:
+            title = f'<a href="{escape(plan["catalyst_link"], quote=True)}">{title}</a>'
+        lines += [
+            f"  {escape(plan['catalyst_type'] or 'Berita emiten')} · {title}",
+            f"  {escape(plan['catalyst_source'] or 'sumber n/a')} · "
+            f"{escape((plan['catalyst_published'] or '')[:10])}",
+            "  Relevansi: sentimen positif terkait "
+            f"{escape((plan['catalyst_type'] or 'emiten').lower())}",
+        ]
+    else:
+        lines.append("  ⚪ TANPA KATALIS TERKONFIRMASI — technical-only, prioritas rendah")
+    if plan["catalyst_risk"]:
+        lines.append(f"  ⚠️ {escape(plan['catalyst_risk'])}")
+    risk_flags = json.loads(plan["risk_flags"] or "[]")
+    if risk_flags:
+        lines += ["", "<b>Risk flags</b>", *(
+            f"  ⚠️ {escape(str(flag))}" for flag in risk_flags
+        )]
+    lines += ["", "Sentuhan intraday hanya PERHATIAN; konfirmasi memakai close dan volume EOD.",
+              f"<i>{DISCLAIMER}</i>"]
+    return _clip("\n".join(lines))
+
+
+def trade_plans_report(plans) -> str:
+    if not plans:
+        return "📋 Belum ada trade plan aktif. Buat dengan <code>/plan KODE</code>."
+    labels = {"WAITING": "MENUNGGU", "ATTENTION": "PERHATIAN", "CONFIRMED": "VALID"}
+    lines = ["📋 <b>Trade plan aktif</b>"]
+    for plan in plans:
+        code = escape(plan["ticker"].removesuffix(".JK"))
+        lines.append(
+            f"  #{plan['id']} <code>{code}</code> · Grade {escape(plan['grade'])} · "
+            f"{labels.get(plan['status'], escape(plan['status']))} · "
+            f"E {num(plan['entry'])} / S {num(plan['stop'])} / T {num(plan['target'])}"
+        )
+    lines += ["", "Detail: <code>/plan KODE</code> · batal: <code>/cancelplan ID</code>"]
+    return _clip("\n".join(lines))
+
+
+def trade_plan_alert(event) -> str:
+    labels = {
+        "attention": "🟠 Trigger tersentuh", "confirmed": "🟢 Breakout terkonfirmasi",
+        "stop": "🔴 Stop tercapai", "target": "✅ Target tercapai",
+        "expired": "⚪ Plan kedaluwarsa", "risk_blocked": "🔴 Konfirmasi ditolak",
+    }
+    price = f"\nHarga observasi <b>{num(event.price)}</b>" if event.price is not None else ""
+    return (f"{labels.get(event.event, '📋 Update plan')}\n"
+            f"<b>Plan #{event.plan_id} — {escape(event.code)}</b>{price}\n"
+            f"{escape(event.detail)}\nLihat plan aktif: /plans")
 
 
 def stock_snapshot(code: str, date: str, close: float, pct_: float | None, volume: float,

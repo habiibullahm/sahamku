@@ -146,6 +146,64 @@ CREATE TABLE IF NOT EXISTS growth_scores (
     risk_flags TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (date, ticker)
 );
 CREATE INDEX IF NOT EXISTS idx_growth_date_total ON growth_scores(date, total DESC);
+CREATE TABLE IF NOT EXISTS trade_risk_profiles (
+    chat_id INTEGER PRIMARY KEY,
+    capital REAL NOT NULL,
+    risk_pct REAL NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS trade_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    ticker TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    grade TEXT NOT NULL,
+    growth_score REAL NOT NULL,
+    catalyst_type TEXT,
+    catalyst_source TEXT,
+    catalyst_title TEXT,
+    catalyst_link TEXT,
+    catalyst_published TEXT,
+    catalyst_risk TEXT,
+    risk_flags TEXT NOT NULL DEFAULT '[]',
+    close REAL NOT NULL,
+    sma50 REAL NOT NULL,
+    sma50_slope_pct REAL NOT NULL,
+    sma200 REAL NOT NULL,
+    rsi14 REAL NOT NULL,
+    rel20 REAL NOT NULL,
+    rel60 REAL NOT NULL,
+    atr14 REAL NOT NULL,
+    prior_high REAL NOT NULL,
+    swing_support REAL,
+    volume_ratio REAL NOT NULL,
+    entry REAL NOT NULL,
+    stop REAL NOT NULL,
+    target REAL NOT NULL,
+    risk_pct REAL NOT NULL,
+    risk_amount REAL NOT NULL,
+    lots INTEGER NOT NULL,
+    position_value REAL NOT NULL,
+    setup_sessions INTEGER NOT NULL DEFAULT 0,
+    holding_sessions INTEGER NOT NULL DEFAULT 0,
+    last_evaluated_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trade_plans_chat_status
+ON trade_plans(chat_id, status, ticker);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_plans_one_active
+ON trade_plans(chat_id, ticker) WHERE status IN ('WAITING','ATTENTION','CONFIRMED');
+CREATE TABLE IF NOT EXISTS trade_plan_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    event TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    price REAL,
+    detail TEXT NOT NULL DEFAULT '',
+    UNIQUE(plan_id, event)
+);
 """
 
 INDICATOR_COLS = [
@@ -176,6 +234,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     wanted = {
         "users": {"plan": "TEXT NOT NULL DEFAULT 'free'"},
         "user_prefs": {"midday": "INTEGER NOT NULL DEFAULT 1"},
+        "trade_plans": {
+            "risk_flags": "TEXT NOT NULL DEFAULT '[]'",
+            "sma50_slope_pct": "REAL NOT NULL DEFAULT 0",
+            "swing_support": "REAL",
+        },
     }
     for table, cols in wanted.items():
         have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
@@ -410,6 +473,102 @@ def watch_remove(conn: sqlite3.Connection, chat_id: int, code: str) -> bool:
 def watch_list(conn: sqlite3.Connection, chat_id: int) -> list[str]:
     return [r["code"] for r in conn.execute(
         "SELECT code FROM watchlist WHERE chat_id=? ORDER BY code", (chat_id,))]
+
+
+# ---------- trade plans ----------
+
+def trade_risk_set(conn: sqlite3.Connection, chat_id: int, capital: float,
+                   risk_pct: float) -> None:
+    conn.execute(
+        "INSERT INTO trade_risk_profiles (chat_id,capital,risk_pct,updated_at) VALUES (?,?,?,?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET capital=excluded.capital, "
+        "risk_pct=excluded.risk_pct, updated_at=excluded.updated_at",
+        (chat_id, capital, risk_pct, _now()),
+    )
+
+
+def trade_risk_get(conn: sqlite3.Connection, chat_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT capital,risk_pct,updated_at FROM trade_risk_profiles WHERE chat_id=?",
+        (chat_id,),
+    ).fetchone()
+
+
+def trade_risk_clear(conn: sqlite3.Connection, chat_id: int) -> bool:
+    return conn.execute(
+        "DELETE FROM trade_risk_profiles WHERE chat_id=?", (chat_id,)
+    ).rowcount > 0
+
+
+def trade_plan_active_for(conn: sqlite3.Connection, chat_id: int,
+                          ticker: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM trade_plans WHERE chat_id=? AND ticker=? "
+        "AND status IN ('WAITING','ATTENTION','CONFIRMED') ORDER BY id DESC LIMIT 1",
+        (chat_id, ticker),
+    ).fetchone()
+
+
+def trade_plans_for(conn: sqlite3.Connection, chat_id: int,
+                    active_only: bool = True) -> list[sqlite3.Row]:
+    q = "SELECT * FROM trade_plans WHERE chat_id=?"
+    if active_only:
+        q += " AND status IN ('WAITING','ATTENTION','CONFIRMED')"
+    return conn.execute(q + " ORDER BY id DESC", (chat_id,)).fetchall()
+
+
+def trade_plans_active(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM trade_plans WHERE status IN ('WAITING','ATTENTION','CONFIRMED') "
+        "ORDER BY id"
+    ).fetchall()
+
+
+def trade_plan_add(conn: sqlite3.Connection, values: dict) -> int:
+    cols = ",".join(values)
+    placeholders = ",".join("?" for _ in values)
+    cur = conn.execute(
+        f"INSERT INTO trade_plans ({cols}) VALUES ({placeholders})",
+        tuple(values.values()),
+    )
+    return int(cur.lastrowid)
+
+
+def trade_plan_update(conn: sqlite3.Connection, plan_id: int, **values) -> None:
+    if not values:
+        return
+    assignments = ",".join(f"{key}=?" for key in values)
+    conn.execute(
+        f"UPDATE trade_plans SET {assignments} WHERE id=?",
+        (*values.values(), plan_id),
+    )
+
+
+def trade_plan_cancel(conn: sqlite3.Connection, chat_id: int, plan_id: int) -> bool:
+    cur = conn.execute(
+        "UPDATE trade_plans SET status='CANCELLED', closed_at=? "
+        "WHERE id=? AND chat_id=? AND status IN ('WAITING','ATTENTION','CONFIRMED')",
+        (_now(), plan_id, chat_id),
+    )
+    return cur.rowcount > 0
+
+
+def trade_plan_event_add(conn: sqlite3.Connection, plan_id: int, event: str,
+                         observed_at: str, price: float | None, detail: str = "") -> bool:
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO trade_plan_events "
+        "(plan_id,event,observed_at,price,detail) VALUES (?,?,?,?,?)",
+        (plan_id, event, observed_at, price, detail),
+    )
+    return cur.rowcount > 0
+
+
+def trade_confirmed_risk_pct(conn: sqlite3.Connection, chat_id: int) -> float:
+    row = conn.execute(
+        "SELECT COALESCE(SUM(risk_pct),0) AS total FROM trade_plans "
+        "WHERE chat_id=? AND status='CONFIRMED'", (chat_id,)
+    ).fetchone()
+    return float(row["total"])
 
 
 # ---------- alerts ----------

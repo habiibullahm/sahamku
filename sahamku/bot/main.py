@@ -21,6 +21,10 @@ log = logging.getLogger(__name__)
 COMMANDS = [
     BotCommand(command="scan", description="Laporan after-market terbaru"),
     BotCommand(command="growth", description="Ranking Potential Growth terbaru"),
+    BotCommand(command="plan", description="Buat/lihat trade plan, contoh: /plan BBCA"),
+    BotCommand(command="plans", description="Daftar trade plan aktif"),
+    BotCommand(command="risk", description="Atur modal dan risiko per trade"),
+    BotCommand(command="cancelplan", description="Batalkan trade plan: /cancelplan ID"),
     BotCommand(command="stock", description="Snapshot + chart, contoh: /stock BBCA"),
     BotCommand(command="watch", description="Tambah ke watchlist"),
     BotCommand(command="unwatch", description="Hapus dari watchlist"),

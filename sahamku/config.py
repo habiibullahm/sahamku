@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     liquidity_min_value_60: float = 3_000_000_000
     liquidity_min_close: float = 50.0
     potential_growth_min_score: float = 60.0
+    trade_plan_default_risk_pct: float = 1.0
+    trade_plan_max_total_risk_pct: float = 3.0
+    trade_plan_setup_sessions: int = 5
+    trade_plan_holding_sessions: int = 20
+    trade_plan_breakout_buffer_pct: float = 0.5
+    trade_plan_max_stop_pct: float = 8.0
     # Kuota /ask per chat per hari (admin bebas kuota)
     ask_daily_limit: int = 10
     # Batas tier Free vs Pro (Pro diberikan admin: /admin pro <chat_id>)

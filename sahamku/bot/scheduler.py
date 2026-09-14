@@ -13,7 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
 from sahamku import alerts, db, screener
-from sahamku.analysis import aftermarket, midday, premarket, weekly
+from sahamku.analysis import aftermarket, midday, premarket, trade_plan, weekly
 from sahamku.config import TZ, settings
 from sahamku.ingestion.eod import ingest, validate_eod
 from sahamku.ingestion.global_ import ingest_global
@@ -115,7 +115,9 @@ async def job_intraday(bot: Bot) -> None:
         with db.db() as conn:
             n = await asyncio.to_thread(intraday_snapshot, conn)
             sent = await _send_alerts(bot, conn, intraday=True)
-        return f"{n} ticker, {sent} alert"
+            plan_events = await asyncio.to_thread(trade_plan.evaluate_all, conn, True)
+            plan_sent = await _send_trade_plan_events(bot, conn, plan_events)
+        return f"{n} ticker, {sent} alert, {plan_sent} update plan"
 
     await _run_logged("intraday", run, bot)
 
@@ -196,6 +198,8 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
             screener.invalidate()
             if ok:
                 await _send_alerts(bot, conn)
+                plan_events = await asyncio.to_thread(trade_plan.evaluate_all, conn)
+                await _send_trade_plan_events(bot, conn, plan_events)
         now = datetime.now(TZ)
         deadline = now.replace(hour=EOD_DEADLINE[0], minute=EOD_DEADLINE[1], second=0)
         if not ok and now + timedelta(minutes=EOD_RETRY_MINUTES) <= deadline:
@@ -268,6 +272,26 @@ async def _send_alerts(bot: Bot, conn, intraday: bool = False) -> int:
             log.warning("gagal kirim alert #%s ke %s", t.alert_id, t.chat_id, exc_info=True)
     if sent:
         log.info("alerts sent: %d", sent)
+    return sent
+
+
+async def _send_trade_plan_events(bot: Bot, conn, events: list[trade_plan.PlanAlert]) -> int:
+    sent = 0
+    allowed = set(db.recipients(conn, "alerts"))
+    for event in events:
+        if event.chat_id not in allowed and event.chat_id != settings.admin_chat_id:
+            continue
+        try:
+            await bot.send_message(event.chat_id, fmt.trade_plan_alert(event))
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            log.warning(
+                "gagal kirim update trade plan #%s ke %s",
+                event.plan_id, event.chat_id, exc_info=True,
+            )
+    if sent:
+        log.info("trade plan updates sent: %d", sent)
     return sent
 
 

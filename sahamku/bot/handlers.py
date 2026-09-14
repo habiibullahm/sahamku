@@ -12,7 +12,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
 from sahamku import alerts, db, levels, news, screener
-from sahamku.analysis import aftermarket, compare, growth, premarket, sector
+from sahamku.analysis import aftermarket, compare, growth, premarket, sector, trade_plan
 from sahamku.config import TZ, settings
 from sahamku.ingestion import intraday
 from sahamku.llm import narrative
@@ -32,6 +32,9 @@ HELP = """<b>Sahamku</b> — daily scan saham IHSG
 
 /scan — laporan after-market terbaru
 /growth — ranking Potential Growth terbaru
+/risk MODAL [PERSEN] — atur profil risiko (default 1%)
+/plan KODE — buat atau lihat trade plan swing breakout
+/plans — daftar plan aktif · /cancelplan ID — batalkan plan
 /stock KODE — snapshot + chart (contoh: /stock BBCA)
 /watch KODE — tambah ke watchlist
 /unwatch KODE — hapus dari watchlist
@@ -173,6 +176,79 @@ async def cmd_stock(m: types.Message, command: CommandObject) -> None:
     # caption Telegram maks 1024 char → kirim chart dan teks terpisah
     await m.answer_photo(FSInputFile(png))
     await m.answer(text, reply_markup=_stock_keyboard(code, watching))
+
+
+@router.message(Command("risk"))
+async def cmd_risk(m: types.Message, command: CommandObject) -> None:
+    args = (command.args or "").strip()
+    with db.db() as conn:
+        if args.lower() in ("clear", "reset"):
+            removed = db.trade_risk_clear(conn, m.chat.id)
+            await m.answer("🗑 Profil risiko dihapus." if removed else "Profil risiko belum diatur.")
+            return
+        if not args:
+            profile = db.trade_risk_get(conn, m.chat.id)
+            if not profile:
+                await m.answer("Atur profil: <code>/risk 10000000 1</code>")
+                return
+            await m.answer(fmt.risk_profile(
+                float(profile["capital"]), float(profile["risk_pct"]),
+                settings.trade_plan_max_total_risk_pct,
+            ))
+            return
+        try:
+            capital, risk_pct = trade_plan.parse_risk_args(args)
+        except trade_plan.PlanError as exc:
+            await m.answer(escape(str(exc)))
+            return
+        db.upsert_user(conn, m.chat.id, m.from_user.username if m.from_user else None)
+        db.trade_risk_set(conn, m.chat.id, capital, risk_pct)
+    await m.answer(fmt.risk_profile(
+        capital, risk_pct, settings.trade_plan_max_total_risk_pct,
+    ))
+
+
+@router.message(Command("plan"))
+async def cmd_plan(m: types.Message, command: CommandObject) -> None:
+    code = _code_arg(command)
+    if not code:
+        await m.answer("Format: <code>/plan KODE</code> — contoh: /plan BBCA")
+        return
+    with db.db() as conn:
+        if not is_known_code(code, conn):
+            await m.answer(f"{escape(code)} tidak ada di universe aktif.")
+            return
+        existing = db.trade_plan_active_for(conn, m.chat.id, to_yf(code))
+        if existing:
+            await m.answer(fmt.trade_plan_report(existing))
+            return
+        try:
+            created = await asyncio.to_thread(trade_plan.create, conn, m.chat.id, code)
+        except trade_plan.PlanError as exc:
+            await m.answer(f"Plan belum dapat dibuat: {escape(str(exc))}")
+            return
+    await m.answer(fmt.trade_plan_report(created))
+
+
+@router.message(Command("plans"))
+async def cmd_plans(m: types.Message) -> None:
+    with db.db() as conn:
+        plans = db.trade_plans_for(conn, m.chat.id)
+    await m.answer(fmt.trade_plans_report(plans))
+
+
+@router.message(Command("cancelplan"))
+async def cmd_cancelplan(m: types.Message, command: CommandObject) -> None:
+    arg = (command.args or "").strip().lstrip("#")
+    if not arg.isdigit():
+        await m.answer("Format: <code>/cancelplan ID</code> — lihat /plans")
+        return
+    with db.db() as conn:
+        cancelled = db.trade_plan_cancel(conn, m.chat.id, int(arg))
+    await m.answer(
+        f"🗑 Trade plan #{arg} dibatalkan."
+        if cancelled else f"Trade plan aktif #{arg} tidak ditemukan."
+    )
 
 
 def _stock_keyboard(code: str, watching: bool) -> InlineKeyboardMarkup:

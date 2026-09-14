@@ -60,3 +60,16 @@ def test_intraday_formatter_marks_status_and_escapes_html():
     assert "PENUTUPAN TERAKHIR" in watchlist and "AA&lt;BB" in watchlist
     assert_telegram_html(ihsg)
     assert_telegram_html(watchlist)
+
+
+def test_scheduled_snapshot_keeps_active_plan_tickers(monkeypatch):
+    conn = _conn()
+    now = datetime(2026, 9, 14, 10, 0, tzinfo=TZ)
+    batches = []
+    monkeypatch.setattr(intraday, "scan_tickers", lambda *_: ["SCAN.JK"])
+    monkeypatch.setattr(db, "trade_plans_active", lambda _: [{"ticker": "PLAN.JK"}])
+    monkeypatch.setattr(
+        intraday, "fetch_history", lambda tickers, period: batches.append(tickers) or {}
+    )
+    assert intraday.snapshot(conn, now=now) == 0
+    assert batches == [["^JKSE", "SCAN.JK", "PLAN.JK"]]
