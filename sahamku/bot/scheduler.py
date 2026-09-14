@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
+from html import escape
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
@@ -20,6 +21,7 @@ from sahamku.ingestion.global_ import ingest_global
 from sahamku.ingestion.intraday import in_session
 from sahamku.ingestion.intraday import snapshot as intraday_snapshot
 from sahamku.llm import narrative
+from sahamku.news import idx_disclosures
 from sahamku.news import ingest as news_ingest
 from sahamku.news import sentiment as news_sentiment
 from sahamku.pipeline import recompute_all
@@ -99,9 +101,32 @@ async def job_news(bot: Bot) -> None:
 
     async def run():
         with db.db() as conn:
+            previous = db.source_state_get(conn, idx_disclosures.SOURCE)
+            disclosure = await asyncio.to_thread(idx_disclosures.refresh, conn)
+            should_warn = (
+                disclosure.status == "stale"
+                and settings.admin_chat_id
+                and (
+                    not previous
+                    or previous["status"] != "stale"
+                    or not str(previous["last_attempt"]).startswith(_today().isoformat())
+                )
+            )
+            if should_warn:
+                try:
+                    await bot.send_message(
+                        settings.admin_chat_id,
+                        "⚠️ Sumber disclosure IDX gagal diperbarui; bot memakai cache terakhir.\n"
+                        f"<code>{escape(disclosure.detail[:300])}</code>",
+                    )
+                except Exception:
+                    log.warning("gagal kirim peringatan disclosure IDX", exc_info=True)
             n = await asyncio.to_thread(news_ingest.ingest, conn)
             a = await news_sentiment.analyze_pending(conn, limit=90)
-        return f"{n} baru, {a} dianalisis"
+        return (
+            f"IDX={disclosure.status}/{disclosure.imported} baru; "
+            f"RSS={n} baru, {a} dianalisis"
+        )
 
     await _run_logged("news", run, bot)
 
@@ -194,6 +219,8 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
         with db.db() as conn:
             await asyncio.to_thread(ingest, conn)
             ok, missing = validate_eod(conn, today)
+            status = "complete_pending" if ok else "retrying"
+            db.eod_state_set(conn, today.isoformat(), status, attempt, len(missing))
             await asyncio.to_thread(recompute_all, conn)
             screener.invalidate()
             if ok:
@@ -210,6 +237,11 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
                 replace_existing=True,
             )
             return f"incomplete ({len(missing)} missing), retry #{attempt + 1} at {nxt:%H:%M}"
+        if not ok:
+            await job_send_eod_waiting(bot, today, missing)
+            with db.db() as conn:
+                db.eod_state_set(conn, today.isoformat(), "waiting_sent", attempt, len(missing))
+            return f"incomplete ({len(missing)} missing); waiting notice sent"
         # kirim laporan (lengkap, atau parsial setelah deadline)
         send_at = now.replace(
             hour=_hm(settings.schedule_override_aftermarket, (17, 0))[0],
@@ -224,6 +256,25 @@ async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int =
         return f"complete={ok}; report sent now"
 
     await _run_logged(f"eod_pipeline#{attempt}", run, bot)
+
+
+async def job_send_eod_waiting(bot: Bot, day: date, missing: list[str]) -> None:
+    """Jujur saat provider belum memberi bar EOD, tanpa menyamarkan laporan lama sebagai baru."""
+    with db.db() as conn:
+        ids = set(db.recipients(conn, "aftermarket"))
+        if settings.admin_chat_id:
+            ids.add(settings.admin_chat_id)
+    text = fmt.eod_pending(day.isoformat(), len(missing))
+    for chat_id in ids:
+        try:
+            await bot.send_message(chat_id, text)
+            await asyncio.sleep(0.05)
+        except TelegramForbiddenError:
+            with db.db() as conn:
+                db.set_subscribed(conn, chat_id, False)
+        except Exception:
+            log.warning("gagal kirim status EOD tertunda ke %s", chat_id, exc_info=True)
+    await _post_channel(bot, text)
 
 
 async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> None:
@@ -251,6 +302,7 @@ async def job_send_aftermarket(bot: Bot, missing: list[str] | None = None) -> No
                 except Exception:
                     log.warning("gagal kirim aftermarket ke %s", cid, exc_info=True)
             r = aftermarket.build(conn, missing=missing)
+            db.eod_state_set(conn, _today().isoformat(), "complete_sent", 0, len(missing or []))
         ch = await _post_channel(bot, fmt.aftermarket(r, cta=True, narrative=narr)) if r else False
         return f"sent to {sent} chats; channel={ch}"
 
@@ -370,4 +422,32 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
                 args=[bot], id="weekly_recap")
     sch.add_job(job_weekly_backtest, CronTrigger(day_of_week="sat", hour=9, minute=15),
                 args=[bot], id="weekly_backtest")
+    _recover_eod_after_restart(sch, bot)
     return sch
+
+
+def _recover_eod_after_restart(scheduler: AsyncIOScheduler, bot: Bot) -> None:
+    """Jadwalkan ulang retry EOD yang sebelumnya hilang karena proses direstart."""
+    now = datetime.now(TZ)
+    if not is_trading_day(now.date()):
+        return
+    with db.db() as conn:
+        state = db.eod_state_get(conn, now.date().isoformat())
+    if not state or state["status"] not in {"retrying", "complete_pending"}:
+        return
+    deadline = now.replace(hour=EOD_DEADLINE[0], minute=EOD_DEADLINE[1], second=0)
+    run_at = now + timedelta(seconds=10)
+    if now >= deadline:
+        run_at = now + timedelta(seconds=10)
+    if state["status"] == "complete_pending":
+        scheduler.add_job(
+            job_send_aftermarket, DateTrigger(run_date=run_at), args=[bot, []],
+            id="eod_recovery", replace_existing=True,
+        )
+    else:
+        scheduler.add_job(
+            job_eod_pipeline, DateTrigger(run_date=run_at),
+            args=[bot, scheduler, int(state["attempt"]) + 1], id="eod_recovery",
+            replace_existing=True,
+        )
+    log.info("recovered EOD retry #%s at %s", state["attempt"], run_at.strftime("%H:%M:%S"))

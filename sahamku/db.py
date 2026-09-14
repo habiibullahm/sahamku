@@ -127,6 +127,33 @@ CREATE TABLE IF NOT EXISTS job_runs (
     status TEXT NOT NULL,
     detail TEXT
 );
+CREATE TABLE IF NOT EXISTS idx_disclosures (
+    id TEXT PRIMARY KEY,
+    ticker TEXT NOT NULL,
+    published TEXT NOT NULL,
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    document_id TEXT,
+    observed_at TEXT NOT NULL,
+    imported_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_disclosures_ticker_published
+ON idx_disclosures(ticker, published DESC);
+CREATE TABLE IF NOT EXISTS source_state (
+    source TEXT PRIMARY KEY,
+    last_attempt TEXT NOT NULL,
+    last_success TEXT,
+    status TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS eod_state (
+    date TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    missing_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS securities (
     code TEXT PRIMARY KEY, name TEXT NOT NULL, sector TEXT NOT NULL, board TEXT NOT NULL,
     instrument_type TEXT NOT NULL, status TEXT NOT NULL, source_date TEXT NOT NULL,
@@ -165,6 +192,7 @@ CREATE TABLE IF NOT EXISTS trade_plans (
     catalyst_title TEXT,
     catalyst_link TEXT,
     catalyst_published TEXT,
+    catalyst_observed TEXT,
     catalyst_risk TEXT,
     risk_flags TEXT NOT NULL DEFAULT '[]',
     close REAL NOT NULL,
@@ -238,6 +266,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "risk_flags": "TEXT NOT NULL DEFAULT '[]'",
             "sma50_slope_pct": "REAL NOT NULL DEFAULT 0",
             "swing_support": "REAL",
+            "catalyst_observed": "TEXT",
         },
     }
     for table, cols in wanted.items():
@@ -646,6 +675,52 @@ def narrative_set(conn: sqlite3.Connection, kind: str, date_str: str, text: str)
 
 
 # ---------- news ----------
+
+def eod_state_set(conn: sqlite3.Connection, date_str: str, status: str, attempt: int,
+                  missing_count: int) -> None:
+    conn.execute(
+        "INSERT INTO eod_state (date,status,attempt,missing_count,updated_at) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(date) DO UPDATE SET status=excluded.status,attempt=excluded.attempt, "
+        "missing_count=excluded.missing_count,updated_at=excluded.updated_at",
+        (date_str, status, attempt, missing_count, _now()),
+    )
+
+
+def eod_state_get(conn: sqlite3.Connection, date_str: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM eod_state WHERE date=?", (date_str,)).fetchone()
+
+def idx_disclosure_upsert(conn: sqlite3.Connection, item: dict) -> bool:
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO idx_disclosures "
+        "(id,ticker,published,category,title,url,document_id,observed_at,imported_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (
+            item["id"], item["ticker"], item["published"], item["category"],
+            item["title"], item["url"], item.get("document_id"),
+            item["observed_at"], _now(),
+        ),
+    )
+    return cur.rowcount > 0
+
+
+def source_state_set(conn: sqlite3.Connection, source: str, status: str, detail: str = "",
+                     success: bool = False) -> None:
+    now = _now()
+    conn.execute(
+        "INSERT INTO source_state (source,last_attempt,last_success,status,detail) "
+        "VALUES (?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET "
+        "last_attempt=excluded.last_attempt, "
+        "last_success=CASE WHEN ? THEN excluded.last_success ELSE source_state.last_success END, "
+        "status=excluded.status, detail=excluded.detail",
+        (source, now, now if success else None, status, detail[:500], 1 if success else 0),
+    )
+
+
+def source_state_get(conn: sqlite3.Connection, source: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM source_state WHERE source=?", (source,)
+    ).fetchone()
+
 
 def news_insert(conn: sqlite3.Connection, it: dict, tickers: str) -> bool:
     cur = conn.execute(

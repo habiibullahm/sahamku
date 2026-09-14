@@ -18,6 +18,7 @@ from sahamku.analysis import aftermarket, growth, midday, premarket, weekly  # n
 from sahamku.ingestion.eod import ingest, validate_eod  # noqa: E402
 from sahamku.ingestion.global_ import ingest_global  # noqa: E402
 from sahamku.ingestion.intraday import snapshot as intraday_snapshot  # noqa: E402
+from sahamku.news import idx_disclosures  # noqa: E402
 from sahamku.news import ingest as news_ingest  # noqa: E402
 from sahamku.news import sentiment as news_sentiment  # noqa: E402
 from sahamku.pipeline import load_joined, recompute_all  # noqa: E402
@@ -57,9 +58,13 @@ def main() -> None:
                 print(_strip(fmt.premarket(r)) if r else "no data")
             case "news":
                 import asyncio
+                disclosure = idx_disclosures.refresh(conn)
                 n = news_ingest.ingest(conn)
                 a = asyncio.run(news_sentiment.analyze_pending(conn, limit=90))
-                print(f"{n} baru, {a} dianalisis")
+                print(
+                    f"IDX={disclosure.status}/{disclosure.imported} baru; "
+                    f"RSS={n} baru, {a} dianalisis"
+                )
             case "intraday":
                 print("snapshot:", intraday_snapshot(conn))
                 r = midday.build(conn, watch_codes=["BBCA", "TLKM"])

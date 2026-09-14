@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     liquidity_min_value_60: float = 3_000_000_000
     liquidity_min_close: float = 50.0
     potential_growth_min_score: float = 60.0
+    idx_disclosure_url: str | None = None
+    idx_disclosure_timeout_seconds: int = 20
+    eod_batch_size: int = 10
+    eod_batch_delay_seconds: float = 1.0
     trade_plan_default_risk_pct: float = 1.0
     trade_plan_max_total_risk_pct: float = 3.0
     trade_plan_setup_sessions: int = 5

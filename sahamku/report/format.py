@@ -392,6 +392,17 @@ def alert_triggered(code: str, label: str, actual: float, metric: str, date: str
             f"Lihat detail: /stock {code}")
 
 
+def eod_pending(date_str: str, missing_count: int) -> str:
+    return (
+        "🟡 <b>MENUNGGU DATA TERBARU</b>\n"
+        f"After-market {escape(date_str)} belum dapat dibuat lengkap. "
+        f"Data EOD dari provider masih belum tersedia untuk {missing_count} ticker.\n"
+        "Bot akan mencoba lagi pada jadwal berikutnya; laporan sebelumnya tetap memakai "
+        "tanggal sumber aslinya.\n\n"
+        f"<i>{DISCLAIMER}</i>"
+    )
+
+
 def risk_profile(capital: float, risk_pct: float, total_limit: float) -> str:
     amount = capital * risk_pct / 100
     return (
@@ -438,15 +449,30 @@ def trade_plan_report(plan) -> str:
         title = escape(plan["catalyst_title"])
         if plan["catalyst_link"]:
             title = f'<a href="{escape(plan["catalyst_link"], quote=True)}">{title}</a>'
+        published_day = (plan["catalyst_published"] or "")[:10]
+        try:
+            age = max(0, (date.today() - date.fromisoformat(published_day)).days)
+            age_text = f" · usia {age} hari"
+        except ValueError:
+            age_text = ""
+        source_label = (
+            "Keterbukaan Informasi IDX"
+            if plan["grade"] == "A" else (plan["catalyst_source"] or "sumber n/a")
+        )
         lines += [
             f"  {escape(plan['catalyst_type'] or 'Berita emiten')} · {title}",
-            f"  {escape(plan['catalyst_source'] or 'sumber n/a')} · "
-            f"{escape((plan['catalyst_published'] or '')[:10])}",
+            f"  {escape(source_label)} · {escape(published_day)}{age_text}",
             "  Relevansi: sentimen positif terkait "
             f"{escape((plan['catalyst_type'] or 'emiten').lower())}",
         ]
+        if plan["catalyst_observed"]:
+            lines.append(f"  Data IDX diperiksa {escape(plan['catalyst_observed'][:16])}")
     else:
         lines.append("  ⚪ TANPA KATALIS TERKONFIRMASI — technical-only, prioritas rendah")
+        if plan["catalyst_observed"]:
+            lines.append(
+                f"  Data IDX terakhir berhasil diperiksa {escape(plan['catalyst_observed'][:16])}"
+            )
     if plan["catalyst_risk"]:
         lines.append(f"  ⚠️ {escape(plan['catalyst_risk'])}")
     risk_flags = json.loads(plan["risk_flags"] or "[]")

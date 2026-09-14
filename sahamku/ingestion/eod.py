@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from datetime import date, timedelta
 
 import pandas as pd
@@ -23,7 +24,7 @@ def fetch_history(tickers: list[str], start: date | None = None, period: str | N
     """Download batch. Return {ticker: df(open..volume)}. Ticker gagal dilewati."""
     kwargs = {"period": period} if period else {"start": start}
     raw = yf.download(
-        tickers, group_by="ticker", auto_adjust=False, threads=True,
+        tickers, group_by="ticker", auto_adjust=False, threads=False,
         progress=False, **kwargs,
     )
     out: dict[str, pd.DataFrame] = {}
@@ -53,11 +54,14 @@ def ingest(conn: sqlite3.Connection, tickers: list[str] | None = None,
     tickers = tickers or all_eod_tickers(conn)
     start = date.today() - timedelta(days=lookback_days)
     counts: dict[str, int] = {}
-    for i in range(0, len(tickers), 50):
-        data = fetch_history(tickers[i:i + 50], start=start)
+    batch_size = max(1, settings.eod_batch_size)
+    for i in range(0, len(tickers), batch_size):
+        data = fetch_history(tickers[i:i + batch_size], start=start)
         counts.update({t: db.upsert_ohlcv(conn, t, df, table=table)
                        for t, df in data.items()})
         conn.commit()
+        if i + batch_size < len(tickers):
+            time.sleep(max(0.0, settings.eod_batch_delay_seconds))
     log.info("ingested %d/%d tickers into %s", len(counts), len(tickers), table)
     return counts
 

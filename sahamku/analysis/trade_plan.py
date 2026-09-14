@@ -6,6 +6,7 @@ import math
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import pandas as pd
 
@@ -25,7 +26,6 @@ STATUS_LABELS = {
     "CANCELLED": "DIBATALKAN",
     "RISK_BLOCKED": "DITOLAK RISIKO",
 }
-OFFICIAL_SOURCES = {"idx", "bei", "keterbukaan informasi idx"}
 CATALYST_PATTERNS = (
     ("Hasil keuangan", ("laba", "pendapatan", "revenue", "earnings", "margin"), 30),
     ("Kontrak/ekspansi", ("kontrak", "ekspansi", "akuisisi", "proyek baru"), 7),
@@ -60,6 +60,7 @@ class Catalyst:
     title: str | None = None
     link: str | None = None
     published: str | None = None
+    observed: str | None = None
     risk: str | None = None
 
 
@@ -112,14 +113,20 @@ def catalyst_for(conn: sqlite3.Connection, code: str,
                  now: datetime | None = None) -> Catalyst:
     now = now or datetime.now(TZ)
     cutoff = (now - timedelta(days=30)).isoformat(timespec="minutes")
+    source_state = db.source_state_get(conn, "idx_disclosures")
+    source_risk = None
+    if source_state and source_state["status"] == "stale":
+        source_risk = "sumber IDX gagal diperbarui; memakai cache resmi terakhir"
     rows = conn.execute(
-        "SELECT source,title,summary,link,published,sentiment FROM news "
-        "WHERE analyzed_at IS NOT NULL AND published>=? "
-        "AND (',' || tickers || ',') LIKE ? ORDER BY published DESC",
+        "SELECT n.source,n.title,n.summary,n.link,n.published,n.sentiment,d.observed_at "
+        "FROM news n LEFT JOIN idx_disclosures d ON d.id=n.id "
+        "WHERE n.analyzed_at IS NOT NULL AND n.published>=? "
+        "AND (',' || n.tickers || ',') LIKE ? "
+        "ORDER BY (d.id IS NOT NULL) DESC, n.published DESC",
         (cutoff, f"%,{code.upper()},%"),
     ).fetchall()
     negative = any(int(r["sentiment"] or 0) < 0 for r in rows)
-    risk = "ada berita negatif terkait" if negative else None
+    risk = "ada berita negatif terkait" if negative else source_risk
     for row in rows:
         if int(row["sentiment"] or 0) <= 0:
             continue
@@ -141,12 +148,19 @@ def catalyst_for(conn: sqlite3.Connection, code: str,
         except (TypeError, ValueError):
             continue
         source = row["source"]
-        official = source.strip().lower() in OFFICIAL_SOURCES
+        parsed_link = urlparse(row["link"] or "")
+        link_host = (parsed_link.hostname or "").lower()
+        official = bool(
+            row["observed_at"]
+            and source.strip().lower() == "idx"
+            and parsed_link.scheme == "https"
+            and (link_host == "idx.co.id" or link_host.endswith(".idx.co.id"))
+        )
         if any(word in text for word in DILUTION_WORDS):
             risk = "potensi dilusi dari corporate action"
         return Catalyst(
             "A" if official else "B", kind, source, row["title"], row["link"],
-            row["published"], risk,
+            row["published"], row["observed_at"], risk,
         )
     security = conn.execute(
         "SELECT sector FROM securities WHERE code=?", (code.upper(),)
@@ -165,9 +179,12 @@ def catalyst_for(conn: sqlite3.Connection, code: str,
             if int(row["sentiment"] or 0) > 0 and any(word in text for word in words):
                 return Catalyst(
                     "B", "Katalis sektoral", row["source"], row["title"], row["link"],
-                    row["published"], risk,
+                    row["published"], None, risk,
                 )
-    return Catalyst("C", risk=risk or "tanpa katalis terkonfirmasi")
+    observed = source_state["last_success"] if source_state else None
+    if not source_state:
+        risk = risk or "sumber disclosure resmi IDX belum dikonfigurasi"
+    return Catalyst("C", observed=observed, risk=risk or "tanpa katalis terkonfirmasi")
 
 
 def market_gate(conn: sqlite3.Connection, date_str: str) -> tuple[bool, str]:
@@ -296,6 +313,7 @@ def create(conn: sqlite3.Connection, chat_id: int, code: str,
         "catalyst_title": catalyst.title,
         "catalyst_link": catalyst.link,
         "catalyst_published": catalyst.published,
+        "catalyst_observed": catalyst.observed,
         "catalyst_risk": catalyst.risk,
         "close": close,
         "sma50": sma50,
