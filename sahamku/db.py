@@ -632,9 +632,12 @@ def intraday_all(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM intraday WHERE date=? ORDER BY ts DESC", (today,)).fetchall()
 
 
-def intraday_get(conn: sqlite3.Connection, ticker: str) -> sqlite3.Row | None:
+def intraday_get(conn: sqlite3.Connection, ticker: str,
+                 date_str: str | None = None) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT * FROM intraday WHERE ticker=? AND date=?", (ticker, _today())).fetchone()
+        "SELECT * FROM intraday WHERE ticker=? AND date=?",
+        (ticker, date_str or _today()),
+    ).fetchone()
 
 
 # ---------- plan (free/pro) ----------

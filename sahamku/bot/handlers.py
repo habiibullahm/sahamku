@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from html import escape
 
 from aiogram import F, Router, types
@@ -12,7 +13,8 @@ from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, Inli
 
 from sahamku import alerts, db, levels, news, screener
 from sahamku.analysis import aftermarket, compare, growth, premarket, sector
-from sahamku.config import settings
+from sahamku.config import TZ, settings
+from sahamku.ingestion import intraday
 from sahamku.llm import narrative
 from sahamku.llm.ask import ask as llm_ask
 from sahamku.pipeline import load_joined
@@ -48,6 +50,34 @@ HELP = """<b>Sahamku</b> — daily scan saham IHSG
 Laporan otomatis: pre-market 08:15 & after-market 17:00 WIB (hari bursa).
 Kuota /ask: {limit} pertanyaan per hari.
 """
+
+
+async def _refresh_manual_snapshot(tickers: list[str], now: datetime) -> None:
+    """Refresh kecil untuk command manual; scheduler tetap menangani universe penuh."""
+    if not intraday.in_session(now):
+        return
+
+    def refresh() -> None:
+        with db.db() as conn:
+            intraday.refresh_if_stale(conn, tickers, now=now)
+
+    await asyncio.to_thread(refresh)
+
+
+def _market_status(row, now: datetime, fallback_date: str) -> tuple[str, str]:
+    if row:
+        observed = row["ts"]
+        time_label = observed[11:16] if len(observed) >= 16 else observed
+        if intraday.is_fresh(row, now):
+            return "🟢 LIVE", f"Observasi {row['date']} {time_label} WIB"
+        return "🟡 TERLAMBAT", f"Observasi {row['date']} {time_label} WIB"
+    return "⚪ PENUTUPAN TERAKHIR", f"Penutupan {fallback_date}"
+
+
+def _eod_change(joined) -> float | None:
+    if len(joined) < 2:
+        return None
+    return (joined["close"].iloc[-1] / joined["close"].iloc[-2] - 1) * 100
 
 
 @router.message(CommandStart())
@@ -254,20 +284,31 @@ async def cmd_admin(m: types.Message, command: CommandObject) -> None:
 
 @router.message(Command("ihsg"))
 async def cmd_ihsg(m: types.Message) -> None:
+    now = datetime.now(TZ)
+    await _refresh_manual_snapshot([IHSG], now)
     with db.db() as conn:
         j = load_joined(conn, IHSG)
+        quote = (db.intraday_get(conn, IHSG, now.date().isoformat())
+                 if intraday.in_session(now) else None)
     if j.empty:
         await m.answer("Data IHSG belum tersedia.")
         return
     last = j.iloc[-1]
     date_str = j.index[-1].strftime("%Y-%m-%d")
-    pct = (last["close"] / j["close"].iloc[-2] - 1) * 100 if len(j) > 1 else None
+    status, observed_at = _market_status(quote, now, date_str)
+    close = float(quote["last"]) if quote else float(last["close"])
+    pct = ((float(quote["last"]) / float(quote["prev_close"]) - 1) * 100
+           if quote and quote["prev_close"] else _eod_change(j))
     ind = {k: (None if last[k] != last[k] else float(last[k]))
            for k in ("sma20", "sma50", "sma200", "rsi14", "macd", "macd_signal")}
     text = fmt.ihsg_snapshot(
-        date_str, float(last["close"]), pct, float(last["volume"]), ind,
+        quote["date"] if quote else date_str, close, pct,
+        float(quote["volume"]) if quote else float(last["volume"]), ind,
         float(j["low"].tail(20).min()), float(j["high"].tail(20).max()),
         premarket.trend_label(last), sr=levels.describe(levels.compute(j)),
+        market_status=status, observed_at=observed_at,
+        intraday_low=float(quote["low"]) if quote else None,
+        intraday_high=float(quote["high"]) if quote else None,
     )
     async with _chart_lock:
         png = await asyncio.to_thread(chart.render, "IHSG", j)
@@ -388,7 +429,33 @@ async def cmd_watchlist(m: types.Message) -> None:
     if not codes:
         await m.answer("Watchlist kosong. Tambah dengan /watch KODE.")
         return
-    await m.answer("👀 Watchlist: " + ", ".join(f"<code>{c}</code>" for c in codes))
+    now = datetime.now(TZ)
+    await _refresh_manual_snapshot([IHSG, *(to_yf(code) for code in codes)], now)
+    with db.db() as conn:
+        ihsg_joined = load_joined(conn, IHSG)
+        ihsg_date = (ihsg_joined.index[-1].strftime("%Y-%m-%d")
+                     if not ihsg_joined.empty else "n/a")
+        ihsg_quote = (db.intraday_get(conn, IHSG, now.date().isoformat())
+                      if intraday.in_session(now) else None)
+        status, observed_at = _market_status(ihsg_quote, now, ihsg_date)
+        items = []
+        for code in codes:
+            quote = (db.intraday_get(conn, to_yf(code), now.date().isoformat())
+                     if intraday.in_session(now) else None)
+            if quote:
+                change = ((float(quote["last"]) / float(quote["prev_close"]) - 1) * 100
+                          if quote["prev_close"] else None)
+                source = None if intraday.is_fresh(quote, now) else "data terlambat"
+                items.append((code, float(quote["last"]), change, source))
+                continue
+            joined = load_joined(conn, to_yf(code))
+            if joined.empty:
+                items.append((code, None, None, "data belum tersedia"))
+                continue
+            eod_date = joined.index[-1].strftime("%Y-%m-%d")
+            items.append((code, float(joined["close"].iloc[-1]), _eod_change(joined),
+                          f"penutupan {eod_date}"))
+    await m.answer(fmt.watchlist_snapshot(items, status, observed_at))
 
 
 @router.message(Command("ask"))

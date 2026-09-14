@@ -342,11 +342,18 @@ def weekly(r: WeeklyReport, cta: bool = False, narrative: str | None = None) -> 
 
 def ihsg_snapshot(date: str, close: float, pct_: float | None, volume: float,
                   ind: dict[str, float | None], support: float, resistance: float,
-                  trend: str, sr: str | None = None) -> str:
+                  trend: str, sr: str | None = None, market_status: str | None = None,
+                  observed_at: str | None = None, intraday_low: float | None = None,
+                  intraday_high: float | None = None) -> str:
+    price_label = "Terakhir" if market_status else "Close"
     lines = [
         f"🇮🇩 <b>IHSG</b> — {date}",
-        f"Close {num(close, 2)}  {pct(pct_)}"
+        *([f"<b>{escape(market_status)}</b> · {escape(observed_at or 'Observasi n/a')}"]
+          if market_status else []),
+        f"{price_label} {num(close, 2)}  {pct(pct_)}"
         + (f" · Vol {vol(volume)}" if volume and volume > 0 else ""),
+        *([f"Range hari ini {num(intraday_low, 0)}–{num(intraday_high, 0)}"]
+          if intraday_low is not None and intraday_high is not None else []),
         "",
         f"<b>Support</b> {num(support)} · <b>Resistance</b> {num(resistance)} (20 hari)",
         *([f"<b>S/R swing</b> {escape(sr)}"] if sr else []),
@@ -360,6 +367,21 @@ def ihsg_snapshot(date: str, close: float, pct_: float | None, volume: float,
         "",
         f"<i>{DISCLAIMER}</i>",
     ]
+    return _clip("\n".join(lines))
+
+
+def watchlist_snapshot(items: list[tuple[str, float | None, float | None, str | None]],
+                       market_status: str, observed_at: str | None) -> str:
+    """Snapshot ringkas watchlist; sumber tiap baris bisa intraday atau EOD."""
+    lines = [
+        "👀 <b>Watchlist</b>",
+        f"<b>{escape(market_status)}</b> · {escape(observed_at or 'Observasi n/a')}",
+        "",
+    ]
+    for code, close, change, source in items:
+        suffix = f" · {escape(source)}" if source else ""
+        lines.append(f"  <code>{escape(code)}</code> {num(close)} {pct(change)}{suffix}")
+    lines += ["", f"<i>{DISCLAIMER}</i>"]
     return _clip("\n".join(lines))
 
 
