@@ -45,6 +45,14 @@ def _today() -> date:
     return datetime.now(TZ).date()
 
 
+def _previous_eod_day(day: date) -> date:
+    """Hari bursa terakhir sebelum ``day`` untuk recovery EOD terlambat."""
+    target = day - timedelta(days=1)
+    while not is_trading_day(target):
+        target -= timedelta(days=1)
+    return target
+
+
 async def _run_logged(job: str, fn, bot: Bot | None = None) -> str:
     """Bungkus job: catat ke job_runs, tangkap exception, beri tahu admin bila gagal."""
     with db.db() as conn:
@@ -211,6 +219,30 @@ async def job_premarket(bot: Bot) -> None:
         return f"sent to {sent} chats; channel={ch}"
 
     await _run_logged("premarket", run, bot)
+
+
+async def job_eod_catchup(bot: Bot) -> None:
+    """Pulihkan EOD hari bursa sebelumnya sebelum laporan pre-market dibuat."""
+    today = _today()
+    if not is_trading_day(today):
+        return
+    target = _previous_eod_day(today)
+
+    async def run():
+        with db.db() as conn:
+            complete, missing = validate_eod(conn, target)
+            if complete:
+                return f"{target}: already complete"
+            counts = await asyncio.to_thread(ingest, conn, as_of=target)
+            complete, missing = validate_eod(conn, target)
+            if counts:
+                await asyncio.to_thread(recompute_all, conn)
+                screener.invalidate()
+            status = "complete_backfill" if complete else "retrying"
+            db.eod_state_set(conn, target.isoformat(), status, 0, len(missing))
+        return f"{target}: {len(counts)} tickers; complete={complete}; missing={len(missing)}"
+
+    await _run_logged(f"eod_catchup_{target.isoformat()}", run, bot)
 
 
 async def job_eod_pipeline(bot: Bot, scheduler: AsyncIOScheduler, attempt: int = 1) -> None:
@@ -406,6 +438,11 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
 
     sch.add_job(job_ingest_global, CronTrigger(day_of_week="mon-fri", hour=7, minute=30),
                 args=[bot], id="ingest_global")
+    # Retry EOD hari sebelumnya sampai lengkap tanpa memasukkan bar intraday hari ini.
+    sch.add_job(job_eod_catchup, CronTrigger(day_of_week="mon-fri", hour=7, minute=0),
+                args=[bot], id="eod_catchup_am")
+    sch.add_job(job_eod_catchup, CronTrigger(day_of_week="mon-fri", hour=8, minute=0),
+                args=[bot], id="eod_catchup_preopen")
     sch.add_job(job_news, CronTrigger(day_of_week="mon-fri", hour=7, minute=45),
                 args=[bot], id="news_am")
     sch.add_job(job_news, CronTrigger(day_of_week="mon-fri", hour=16, minute=10),

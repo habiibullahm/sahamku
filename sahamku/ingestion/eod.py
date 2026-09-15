@@ -19,10 +19,12 @@ log = logging.getLogger(__name__)
 COLS = ["open", "high", "low", "close", "volume"]
 
 
-def fetch_history(tickers: list[str], start: date | None = None, period: str | None = None
-                  ) -> dict[str, pd.DataFrame]:
+def fetch_history(tickers: list[str], start: date | None = None, period: str | None = None,
+                  end: date | None = None) -> dict[str, pd.DataFrame]:
     """Download batch. Return {ticker: df(open..volume)}. Ticker gagal dilewati."""
     kwargs = {"period": period} if period else {"start": start}
+    if end is not None and period is None:
+        kwargs["end"] = end
     raw = yf.download(
         tickers, group_by="ticker", auto_adjust=False, threads=False,
         progress=False, **kwargs,
@@ -49,14 +51,17 @@ def fetch_history(tickers: list[str], start: date | None = None, period: str | N
 
 
 def ingest(conn: sqlite3.Connection, tickers: list[str] | None = None,
-           lookback_days: int = 10, table: str = "ohlcv") -> dict[str, int]:
-    """Tarik N hari terakhir dan upsert. Return {ticker: rows}."""
+           lookback_days: int = 10, table: str = "ohlcv",
+           as_of: date | None = None) -> dict[str, int]:
+    """Tarik N hari terakhir hingga ``as_of`` dan upsert. Return {ticker: rows}."""
     tickers = tickers or all_eod_tickers(conn)
-    start = date.today() - timedelta(days=lookback_days)
+    target = as_of or date.today()
+    start = target - timedelta(days=lookback_days)
+    end = target + timedelta(days=1) if as_of else None
     counts: dict[str, int] = {}
     batch_size = max(1, settings.eod_batch_size)
     for i in range(0, len(tickers), batch_size):
-        data = fetch_history(tickers[i:i + batch_size], start=start)
+        data = fetch_history(tickers[i:i + batch_size], start=start, end=end)
         counts.update({t: db.upsert_ohlcv(conn, t, df, table=table)
                        for t, df in data.items()})
         conn.commit()
