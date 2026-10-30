@@ -1,173 +1,467 @@
 # Sahamku
 
-Bot Telegram (`@sahamku_id_bot`) untuk daily scan saham liquid IDX: laporan **pre-market** dan
-**after-market** otomatis, sinyal teknikal rule-based, chart, watchlist, dan `/ask` berbasis Claude.
+[![CI](https://github.com/muhfalihr/sahamku/actions/workflows/ci.yml/badge.svg)](https://github.com/muhfalihr/sahamku/actions/workflows/ci.yml)
 
-> ⚠️ Bukan saran investasi. Semua sinyal bersifat analitis dari data historis.
+**Automated Telegram bot for Indonesian stock market (IDX) technical analysis and trading signals.**
 
-## Setup
+Sahamku scans liquid IDX/LQ45 stocks daily and delivers automated pre-market and after-market reports with rule-based technical signals, performance charts, watchlists, and AI-powered Q&A. Built for traders who want systematic technical analysis delivered directly to Telegram, running 24/7 on Docker.
+
+**Disclaimer:** This bot is for informational and educational purposes only. All signals are analytical outputs based on historical data and technical indicators. Not financial advice. Trading decisions and their outcomes are solely your responsibility.
+
+---
+
+## Features
+
+- **Automated Daily Reports**
+  - Pre-market analysis (global sentiment, IHSG support/resistance, previous signals, watchlists)
+  - Midday summary during trading hours
+  - After-market report (IHSG recap, top movers, bullish/bearish signals, watchlists)
+  - Weekly performance recap
+
+- **Technical Signals**
+  - Rule-based scoring: Golden/Death Cross (SMA50/200), RSI oversold/overbought, breakout/breakdown with volume, MACD cross, Bollinger Squeeze
+  - Multi-factor rating system (bullish ≥ +2, bearish ≤ −2)
+  - Backtested on LQ45 stocks (3-year historical data)
+
+- **Interactive Commands**
+  - `/scan` — After-market report from latest data
+  - `/stock BBCA` — Snapshot: price, indicators, rating, signals + 60-day chart
+  - `/growth` — Top 20 Potential Growth candidates (technical scoring)
+  - `/watch` / `/unwatch` / `/watchlist` — Per-chat watchlist management
+  - `/ask <question>` — AI-powered Q&A with market context (Claude/Groq), remembers conversation for 2 hours
+  - `/ihsg` — Index snapshot + chart + support/resistance
+  - `/news [TICKER]` — Market/stock news with sentiment (🟢🔴⚪)
+  - `/screener rsi<35 above200` — Filter stocks by rating, RSI, volume, breakout, etc.
+  - `/compare BBCA BBRI BMRI` — Multi-stock return comparison with normalized chart
+  - `/sector` — Sector averages, bullish/bearish counts, best/worst performers
+  - `/alert BBCA > 6500` — Price/RSI alerts (checked every 15 minutes during trading hours + after close)
+
+- **Architecture Highlights**
+  - Scheduled jobs with APScheduler (market hours, pre/post-market timing)
+  - EOD + intraday data ingestion from Yahoo Finance
+  - IDX disclosure integration (material contracts, dividends, corporate actions)
+  - SQLite storage for OHLCV, indicators, signals, user preferences
+  - Chart rendering with mplfinance
+  - Telegram long polling (aiogram 3.x)
+  - Claude/Groq LLM integration for conversational Q&A
+  - Dockerized deployment with auto-restart
+
+---
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph Scheduler
+        A[APScheduler]
+        A --> B[Pre-market 08:15]
+        A --> C[Intraday 09:00-16:00 every 15 min]
+        A --> D[EOD 16:10, 16:30]
+        A --> E[After-market 17:00]
+        A --> F[Weekly Sat 09:00]
+    end
+
+    subgraph Ingestion
+        G[Yahoo Finance EOD]
+        H[Yahoo Finance Intraday]
+        I[IDX Disclosures]
+        J[Global Assets]
+    end
+
+    subgraph Pipeline
+        K[OHLCV Data]
+        L[Technical Indicators]
+        M[Signal Engine]
+        N[Scoring & Rating]
+    end
+
+    subgraph Storage
+        O[(SQLite DB)]
+        P[Chart Renderer]
+    end
+
+    subgraph Bot
+        Q[Telegram Long Polling]
+        R[Command Handlers]
+        S[Report Formatter]
+        T[AI Q&A - Claude/Groq]
+    end
+
+    G --> K
+    H --> K
+    I --> O
+    J --> O
+    K --> O
+    K --> L
+    L --> M
+    M --> N
+    N --> O
+    O --> P
+    O --> R
+    O --> S
+    O --> T
+    A --> G
+    A --> H
+    A --> I
+    A --> J
+    E --> S
+    B --> S
+    C --> H
+    S --> Q
+    R --> Q
+    T --> Q
+    P --> Q
+```
+
+---
+
+## Tech Stack
+
+- **Language:** Python 3.12
+- **Bot Framework:** aiogram 3.13+ (Telegram Bot API)
+- **Scheduler:** APScheduler 3.10
+- **Data:** Yahoo Finance (yfinance), pandas, numpy
+- **Database:** SQLite (OHLCV, indicators, signals, user state)
+- **Charts:** mplfinance
+- **AI/LLM:** Anthropic Claude / Groq
+- **Testing:** pytest, ruff
+- **Deployment:** Docker + Docker Compose
+
+---
+
+## Configuration
+
+All configuration is managed through environment variables. Copy `.env.example` to `.env` and fill in required values:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows
+# Required
+TELEGRAM_BOT_TOKEN=<your_bot_token>
+ADMIN_CHAT_ID=<your_telegram_chat_id>
+
+# LLM provider (groq or anthropic)
+LLM_PROVIDER=groq
+GROQ_API_KEY=<your_groq_api_key>
+ANTHROPIC_API_KEY=<your_anthropic_api_key>
+
+# Optional
+CHANNEL_ID=@your_channel  # For broadcasting reports (bot must be channel admin)
+UNIVERSE=liquid           # Stock universe: lq45 | idx80 | liquid
+DB_PATH=sahamku.db
+SCHEDULE_OVERRIDE_AFTERMARKET=17:00  # Override schedule for testing
+```
+
+**Finding your Telegram chat ID:** Send `/start` to your bot and check the logs, or use [@userinfobot](https://t.me/userinfobot).
+
+---
+
+## Setup & Development
+
+### Linux / macOS
+
+```bash
+# Clone repository
+git clone https://github.com/muhfalihr/sahamku.git
+cd sahamku
+
+# Create virtual environment
+python3.12 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
 pip install -e ".[dev]"
-copy .env.example .env          # lalu isi TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, ADMIN_CHAT_ID
-python scripts/backfill.py      # tarik 3 tahun histori + hitung indikator & sinyal (±1 menit)
-python -m sahamku.bot.main      # jalankan bot (long polling + scheduler)
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your tokens and API keys
+
+# Backfill historical data (3 years + compute indicators/signals, ~1 minute)
+python scripts/backfill.py
+
+# Run bot (long polling + scheduler)
+python -m sahamku.bot.main
 ```
 
-`ADMIN_CHAT_ID` = chat_id Telegram Anda (kirim `/start` ke bot, lihat log, atau pakai @userinfobot).
-
-`CHANNEL_ID` (opsional) = channel publik, mis. `@sahamku_id`. Laporan pre/after-market ikut diposting
-ke channel (tanpa watchlist). Bot harus dijadikan **admin channel** dengan izin *Post messages*.
-
-## Jalankan 24 jam dengan Docker
+### Windows
 
 ```bash
-docker compose up -d --build     # build + jalankan di background, auto-restart
-docker compose logs -f           # lihat log
-docker compose down              # hentikan
+# Clone repository
+git clone https://github.com/muhfalihr/sahamku.git
+cd sahamku
+
+# Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install dependencies
+pip install -e ".[dev]"
+
+# Configure environment
+copy .env.example .env
+# Edit .env with your tokens and API keys
+
+# Backfill historical data
+python scripts/backfill.py
+
+# Run bot
+python -m sahamku.bot.main
 ```
 
-- DB dan chart disimpan di `./data/` (volume). Jika `data/sahamku.db` belum ada, entrypoint
-  menjalankan backfill 3 tahun otomatis saat start pertama.
-- Setelah mengubah `.env`: `docker compose up -d` (recreate). Setelah mengubah kode:
-  `docker compose up -d --build`.
-- Agar bot hidup setelah laptop/PC restart: aktifkan **Docker Desktop → Settings → General →
-  Start Docker Desktop when you sign in**. Bot tetap butuh mesin ini menyala; untuk 24/7 penuh,
-  jalankan compose yang sama di VPS.
-- Jangan jalankan `python -m sahamku.bot.main` lokal bersamaan dengan container — Telegram hanya
-  mengizinkan satu long-polling per bot.
+**Note:** Do not run local long polling simultaneously with Docker — Telegram allows only one active long-polling session per bot.
 
-## Deploy ke VPS (Ubuntu 22.04/24.04)
+---
 
-Untuk setup awal, ikuti [runbook VPS](docs/VPS.md). Setelah alias SSH `bot-vps`
-tersedia dan `/opt/sahamku/.env` sudah diisi, deploy setiap commit dengan:
+## Docker Deployment
+
+### Local Docker (24/7 on your machine)
+
+```bash
+# Build and start in background with auto-restart
+docker compose up -d --build
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
+```
+
+- Database and charts are persisted in `./data/` volume
+- If `data/sahamku.db` does not exist, the entrypoint runs backfill automatically on first start
+- After changing `.env`: `docker compose up -d` (recreate container)
+- After code changes: `docker compose up -d --build`
+- For 24/7 operation: Enable **Docker Desktop → Settings → General → Start Docker Desktop when you sign in**
+
+### VPS Deployment (Ubuntu 22.04/24.04)
+
+For initial VPS setup, follow the [VPS runbook](docs/VPS.md). After SSH alias `bot-vps` is configured and `/opt/sahamku/.env` is populated:
 
 ```bash
 bash scripts/deploy.sh
 ```
 
-Skrip mengirim snapshot commit saat ini ke `/opt/sahamku`, membangun image Docker, dan mengganti
-container. VPS tidak membutuhkan akses GitHub. Untuk verifikasi: `ssh bot-vps "cd /opt/sahamku && sudo docker compose ps"`.
+The script creates a Git archive of the current commit, transfers it to `/opt/sahamku` on the VPS, rebuilds the Docker image, and replaces the running container. No GitHub access required on VPS.
 
-## Command
-
-| Command | Fungsi |
-|---|---|
-| `/scan` | Laporan after-market dari data terakhir |
-| `/growth` | Ranking hingga 20 kandidat Potential Growth (teknikal, bukan prediksi multibagger) |
-| `/stock BBCA` | Snapshot harga, indikator, rating, sinyal + chart 60 hari |
-| `/watch BBCA` / `/unwatch BBCA` / `/watchlist` | Watchlist per chat; ikut dilaporkan di pre/after-market |
-| `/ask kenapa BBCA turun?` | Tanya AI dengan konteks harga, indikator, sinyal, S/R, berita; ingat percakapan 2 jam (`/ask clear`) |
-| `/ihsg` | Snapshot IHSG + chart + support/resistance |
-| `/news [KODE]` | Berita pasar/emiten dengan sentimen (🟢🔴⚪) |
-| `/screener rsi<35 above200` | Filter saham (rating, rsi, chg, vol, squeeze, breakout, golden, …) |
-| `/compare BBCA BBRI BMRI` | Return 1W/1M/3M, RSI, posisi vs SMA + chart normalisasi |
-| `/sector` | Rata-rata % per sektor, jumlah bullish/bearish, terbaik/terburuk |
-| `/alert BBCA > 6500` / `/alerts` / `/unalert ID` | Alert level harga/RSI, dicek tiap 15 menit (delayed) & setelah close |
-| `/settings` | Pilih laporan yang diterima (pre-market, tengah hari, after-market, mingguan, alert) |
-| `/stop` / `/resume` | Matikan/aktifkan semua laporan otomatis |
-| `/admin`, `/admin broadcast <pesan>`, `/admin pro\|free <chat_id>` | Statistik, broadcast, tier user (hanya `ADMIN_CHAT_ID`) |
-
-## Jadwal (WIB, hari bursa; libur di `sahamku/universe.py`)
-
-| Jam | Job |
-|---|---|
-| 07:30 · 07:45 | Ingest aset global · ingest & analisis berita (Wall Street, Asia, minyak, emas, USD/IDR, UST10Y) |
-| 09:00–16:00 tiap 15 mnt | Snapshot intraday (delayed) + cek alert |
-| 12:15 (Jumat 11:45) | Ringkasan tengah hari (bot & channel) |
-| 08:15 | Kirim laporan pre-market (sentimen global, level S/R IHSG, sinyal kemarin, watchlist) |
-| 16:10 · 16:30 | Berita · ingest EOD universe aktif+IHSG → validasi → indikator, sinyal, dan Potential Growth. Retry tiap 15 menit s/d 18:00 jika belum lengkap |
-| 17:00 | Kirim laporan after-market (IHSG, top movers, sinyal bullish/bearish, squeeze, watchlist) |
-| Sabtu 09:00 · 09:15 | Rekap mingguan (user & channel) · backtest ke admin |
-
-Untuk uji cepat, set `SCHEDULE_OVERRIDE_AFTERMARKET=HH:MM` / `SCHEDULE_OVERRIDE_PREMARKET=HH:MM`
-di `.env` (ingest EOD otomatis dijalankan 2 menit sebelum jam kirim).
-
-## Job manual
-
+**Verify deployment:**
 ```bash
-python scripts/run_job.py eod          # ingest 10 hari terakhir + validasi
-python scripts/run_job.py global
-python scripts/run_job.py compute      # hitung ulang indikator & sinyal
-python scripts/run_job.py aftermarket  # print laporan
-python scripts/run_job.py premarket
-python scripts/run_job.py chart BBCA
-python scripts/update_universe.py idx-stocks.csv       # validasi master saham
-python scripts/update_universe.py idx-stocks.csv --apply # impor setelah lolos validasi
-python -m sahamku.backtest.run         # tabel win rate per rule
+ssh bot-vps "cd /opt/sahamku && sudo docker compose ps"
 ```
 
-CSV master memakai UTF-8 dengan kolom `code,name,sector,board,instrument_type,status`.
+---
 
-Untuk sumber KSEI, unduh **Master File Efek** lalu normalisasi dahulu. Proses ini hanya
-menyertakan `EQUITY` yang `ACTIVE`, terdaftar di `IDX`, dan memiliki kode empat huruf:
+## Testing
+
+Run the full test suite:
+
+```bash
+pytest
+```
+
+Run with verbose output:
+
+```bash
+pytest -v
+```
+
+Lint code:
+
+```bash
+ruff check sahamku tests
+```
+
+Manual job testing (no Telegram messages sent):
+
+```bash
+python scripts/run_job.py aftermarket  # Print after-market report
+python scripts/run_job.py premarket    # Print pre-market report
+python scripts/run_job.py chart BBCA   # Generate chart
+```
+
+---
+
+## Scheduled Jobs
+
+Jobs run in Asia/Jakarta timezone (WIB) on trading days. Market holidays are defined in `sahamku/universe.py`.
+
+| Time | Job |
+|------|-----|
+| 07:30, 07:45 | Ingest global assets (Wall Street, Asia, oil, gold, USD/IDR, UST10Y) + news |
+| 08:15 | Send pre-market report (global sentiment, IHSG support/resistance, previous signals, watchlist) |
+| 09:00–16:00 every 15 min | Intraday snapshot (delayed) + check alerts |
+| 12:15 (Fri 11:45) | Midday summary |
+| 16:10, 16:30 | Ingest EOD + validate → compute indicators, signals, Potential Growth. Retry every 15 min until 18:00 if incomplete |
+| 17:00 | Send after-market report (IHSG, top movers, bullish/bearish signals, squeeze, watchlist) |
+| Sat 09:00, 09:15 | Weekly recap (users + channel) + backtest to admin |
+
+**Testing schedule overrides:** Set `SCHEDULE_OVERRIDE_AFTERMARKET=HH:MM` or `SCHEDULE_OVERRIDE_PREMARKET=HH:MM` in `.env`. EOD ingestion runs automatically 2 minutes before the report send time.
+
+---
+
+## Stock Universe Management
+
+The bot supports three universe modes:
+
+- `lq45` — LQ45 index constituents
+- `idx80` — IDX80 index constituents
+- `liquid` — Custom liquid stocks from CSV master file (recommended)
+
+### Importing IDX Stock Master
+
+```bash
+# Validate CSV before import
+python scripts/update_universe.py idx-stocks.csv
+
+# Apply after validation passes
+python scripts/update_universe.py idx-stocks.csv --apply
+```
+
+CSV format (UTF-8): `code,name,sector,board,instrument_type,status`
+
+### KSEI Master File Normalization
+
+If using KSEI **Master File Efek**, normalize first (filters for active IDX equity with 4-letter codes):
 
 ```bash
 python scripts/normalize_ksei_master.py data/source/StatisEfek20260831.txt.zip \
   --output data/source/idx-stocks-2026-08-31.csv
+
 python scripts/update_universe.py data/source/idx-stocks-2026-08-31.csv --apply \
   --source-date 2026-08-31
 ```
 
-Master KSEI tidak memuat papan pencatatan IDX. CSV hasilnya menetapkan `board=Unknown`
-secara eksplisit; tambahkan enrichment dari ekspor daftar saham IDX apabila board diperlukan.
-Gunakan `--source-date YYYY-MM-DD` bila tanggal sumber berbeda dari tanggal impor. Setelah impor,
-restart bot agar ticker baru di-backfill; selama master belum tersedia mode `liquid` memakai IDX80.
+**Note:** KSEI master does not include IDX board listings. The normalized CSV sets `board=Unknown` explicitly. After import, restart the bot to backfill new tickers. If no master is available, `liquid` mode falls back to IDX80.
 
-## Tier
+---
 
-| | Free | Pro (`/admin pro <chat_id>`) |
-|---|---|---|
-| Watchlist | 5 | 30 |
-| Alert aktif | 3 | 20 |
-| `/ask` per hari | 10 | 50 |
+## User Tiers
 
-Pembayaran belum diintegrasikan; tier diberikan manual oleh admin.
+| Feature | Free | Pro (Admin-granted) |
+|---------|------|---------------------|
+| Watchlist | 5 stocks | 30 stocks |
+| Active alerts | 3 | 20 |
+| `/ask` per day | 10 | 50 |
 
-## Sinyal
+Pro tier is manually granted by admin via `/admin pro <chat_id>`. Payment integration not yet implemented.
 
-Rule di `sahamku/signals/rules.py`, bobot di `scoring.py`, threshold di `config.py`:
-golden/death cross (SMA50/200), RSI oversold/overbought cross, breakout/breakdown 20D + volume
-≥1.5× rata-rata, MACD cross, Bollinger squeeze (informasi), posisi vs SMA200.
-Skor ≥ +2 → bullish, ≤ −2 → bearish.
+---
 
-### Hasil backtest awal (LQ45, 3 tahun s/d 2026-09-11, tanpa biaya transaksi)
+## Signal Rules & Backtesting
 
-| Rule | Arah | n | Win 10D | Avg 10D |
-|---|---|---|---|---|
-| RSI overbought | bear | 366 | 58.7% | +1.25% |
-| Death cross | bear | 90 | 53.3% | +1.16% |
-| RSI oversold | bull | 465 | 53.3% | +1.41% |
-| MACD cross down | bear | 1334 | 50.5% | +0.09% |
-| Breakdown low 20D + vol | bear | 738 | 44.7% | −0.69% |
-| Breakout high 20D + vol | bull | 772 | 42.6% | −0.31% |
-| MACD cross up | bull | 1330 | 41.2% | −0.65% |
-| Golden cross | bull | 77 | 37.7% | −1.40% |
+Rules defined in `sahamku/signals/rules.py`, weights in `scoring.py`, thresholds in `config.py`:
 
-Return dihitung searah sinyal. Periode ini IHSG cenderung turun, sehingga rule mean-reversion
-(RSI) lebih baik daripada momentum. Gunakan tabel ini untuk menyesuaikan bobot/threshold.
+- Golden/Death Cross (SMA50/200)
+- RSI oversold/overbought cross
+- Breakout/breakdown 20D high/low + volume ≥ 1.5× average
+- MACD cross
+- Bollinger Squeeze (informational)
+- Position relative to SMA200
 
-## Struktur
+**Scoring:** Score ≥ +2 → bullish, ≤ −2 → bearish.
+
+### Backtest Results (LQ45, 3 years to 2026-09-11, no transaction costs)
+
+| Rule | Direction | n | Win 10D | Avg 10D |
+|------|-----------|---|---------|---------|
+| RSI overbought | Bear | 366 | 58.7% | +1.25% |
+| Death cross | Bear | 90 | 53.3% | +1.16% |
+| RSI oversold | Bull | 465 | 53.3% | +1.41% |
+| MACD cross down | Bear | 1334 | 50.5% | +0.09% |
+| Breakdown 20D + vol | Bear | 738 | 44.7% | −0.69% |
+| Breakout 20D + vol | Bull | 772 | 42.6% | −0.31% |
+| MACD cross up | Bull | 1330 | 41.2% | −0.65% |
+| Golden cross | Bull | 77 | 37.7% | −1.40% |
+
+Returns calculated in signal direction. During this period, IHSG trended down, favoring mean-reversion (RSI) over momentum. Use these results to tune weights/thresholds.
+
+Run backtest:
+
+```bash
+python -m sahamku.backtest.run
+```
+
+---
+
+## Project Structure
 
 ```
 sahamku/
-  config.py        env & threshold          universe.py   universe IDX, global, libur bursa
-  db.py            SQLite                   pipeline.py   OHLCV → indikator → sinyal → rating
-  ingestion/       eod.py, global_.py       indicators/   technical.py
-  signals/         rules.py, scoring.py     analysis/     premarket.py, aftermarket.py
-  report/          format.py, chart.py      llm/          ask.py (Claude)
-  bot/             main.py, handlers.py, scheduler.py
-  backtest/        run.py
-scripts/           backfill.py, run_job.py
+  config.py        # Environment vars & thresholds
+  db.py            # SQLite schema & queries
+  universe.py      # IDX universe, global assets, market holidays
+  pipeline.py      # OHLCV → indicators → signals → rating
+  ingestion/
+    eod.py         # EOD data ingestion
+    global_.py     # Global assets
+    intraday.py    # Intraday snapshots
+  indicators/
+    technical.py   # SMA, RSI, MACD, Bollinger Bands
+  signals/
+    rules.py       # Signal rules
+    scoring.py     # Multi-factor scoring
+  analysis/
+    premarket.py   # Pre-market report generation
+    aftermarket.py # After-market report generation
+    growth.py      # Potential Growth ranking
+  report/
+    format.py      # Telegram HTML formatting
+    chart.py       # Chart rendering with mplfinance
+  llm/
+    ask.py         # Claude/Groq Q&A
+    providers.py   # LLM provider abstraction
+  bot/
+    main.py        # Bot entry point
+    handlers.py    # Telegram command handlers
+    scheduler.py   # APScheduler job definitions
+  backtest/
+    run.py         # Backtest runner
+scripts/
+  backfill.py      # Historical data backfill
+  run_job.py       # Manual job execution
+  update_universe.py # Stock universe management
 tests/
 ```
 
-## Catatan
+---
 
-- Data dari Yahoo Finance (gratis, EOD). Bisa telat/gap — `validate_eod` + retry menanganinya; laporan
-  parsial diberi tanda ticker yang hilang.
-- Universe dipilih lewat `UNIVERSE=lq45|idx80|liquid`. Mode liquid memakai master CSV IDX tervalidasi;
-  jika belum diimpor, bot memakai IDX80 sebagai fallback dan memberi label secara eksplisit.
-- `.env`, `*.db`, dan `charts/` tidak di-commit.
+## Data Sources & Limitations
+
+- **Market data:** Yahoo Finance (free, EOD). Possible delays/gaps. `validate_eod` + retry mechanism handles this. Partial reports are flagged with missing tickers.
+- **Intraday data:** 15-minute delayed snapshots during market hours
+- **News:** IDX disclosures, RSS feeds with sentiment analysis
+- **Global assets:** Wall Street indices, Asian markets, commodities, USD/IDR, US Treasury 10Y
+
+**Database location:** `sahamku.db` (configurable via `DB_PATH`)  
+**Charts location:** `charts/` directory (configurable via `CHARTS_DIR`)
+
+**Important:** Never commit `.env`, `*.db`, or `charts/` to version control.
+
+---
+
+## Contributing
+
+Contributions welcome! This is a personal project built for learning and practical use.
+
+1. Fork the repository
+2. Create a feature branch
+3. Run tests: `pytest`
+4. Lint: `ruff check sahamku tests`
+5. Submit a pull request
+
+---
+
+## License
+
+MIT License — see LICENSE file for details.
+
+---
+
+## Contact
+
+**Developer:** Muhammad  
+**Role:** Backend/Full-Stack Developer | AI Engineering  
+**Looking for:** Remote full-stack and AI engineering roles
+
+For questions or collaboration: [GitHub Issues](https://github.com/muhfalihr/sahamku/issues)
+
+---
+
+**Built with Python 3.12 • aiogram • pandas • SQLite • Docker • Claude AI**
