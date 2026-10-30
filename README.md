@@ -1,6 +1,6 @@
 # Sahamku
 
-[![CI](https://github.com/muhfalihr/sahamku/actions/workflows/ci.yml/badge.svg)](https://github.com/muhfalihr/sahamku/actions/workflows/ci.yml)
+[![CI](https://github.com/habiibullahm/sahamku/actions/workflows/ci.yml/badge.svg)](https://github.com/habiibullahm/sahamku/actions/workflows/ci.yml)
 
 **Automated Telegram bot for Indonesian stock market (IDX) technical analysis and trading signals.**
 
@@ -160,7 +160,7 @@ SCHEDULE_OVERRIDE_AFTERMARKET=17:00  # Override schedule for testing
 
 ```bash
 # Clone repository
-git clone https://github.com/muhfalihr/sahamku.git
+git clone https://github.com/habiibullahm/sahamku.git
 cd sahamku
 
 # Create virtual environment
@@ -185,7 +185,7 @@ python -m sahamku.bot.main
 
 ```bash
 # Clone repository
-git clone https://github.com/muhfalihr/sahamku.git
+git clone https://github.com/habiibullahm/sahamku.git
 cd sahamku
 
 # Create virtual environment
@@ -460,7 +460,7 @@ MIT License — see LICENSE file for details.
 **Role:** Backend/Full-Stack Developer | AI Engineering  
 **Looking for:** Remote full-stack and AI engineering roles
 
-For questions or collaboration: [GitHub Issues](https://github.com/muhfalihr/sahamku/issues)
+For questions or collaboration: [GitHub Issues](https://github.com/habiibullahm/sahamku/issues)
 
 ---
 
